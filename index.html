@@ -4,9 +4,18 @@
     <script src="https://telegram.org/js/telegram-web-app.js"></script>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Создать фильтр</title>
+    <title>HomeScan</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <style>
+      .active-tab {
+        color: #38bdf8 !important;
+      }
+      .active-tab svg {
+        stroke: #38bdf8;
+      }
+      .hidden-section {
+        display: none !important;
+      }
       .active {
         background: #38bdf8 !important;
         color: white;
@@ -15,8 +24,9 @@
       }
     </style>
   </head>
-  <body class="min-h-screen bg-slate-950 text-slate-100">
-    <div class="mx-auto max-w-lg px-4 pb-28 pt-6">
+  <body class="min-h-screen bg-slate-950 text-slate-100 pb-20">
+    <!-- SECTION: ФИЛЬТРЫ -->
+    <div id="section-filters" class="section mx-auto max-w-lg px-4 pt-6">
       <header class="mb-5">
         <div class="flex items-center justify-between">
           <h1 class="text-2xl font-semibold tracking-tight">Создать фильтр</h1>
@@ -36,26 +46,12 @@
           />
         </section>
 
-        <!-- Тип объявления dwdw -->
+        <!-- Тип объявления -->
         <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
           <p class="block text-sm font-medium text-slate-200">Тип объявления</p>
           <div class="mt-3 grid grid-cols-2 gap-2">
-            <button
-              id="tabRent"
-              type="button"
-              class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700"
-              data-type="rent"
-            >
-              Аренда
-            </button>
-            <button
-              id="tabSale"
-              type="button"
-              class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700"
-              data-type="sale"
-            >
-              Продажа
-            </button>
+            <button id="tabRent" type="button" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700" data-type="rent">Аренда</button>
+            <button id="tabSale" type="button" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700" data-type="sale">Продажа</button>
           </div>
         </section>
 
@@ -65,14 +61,10 @@
           <div class="mt-3 grid grid-cols-1 gap-3">
             <div>
               <label for="regionSelect" class="block text-xs text-slate-400">Область</label>
-              <select
-                id="regionSelect"
-                class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-              >
+              <select id="regionSelect" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60">
                 <option value="tashkent" selected>Ташкент</option>
               </select>
             </div>
-
             <div>
               <p class="block text-xs text-slate-400">Районы</p>
               <div id="cityGrid" class="mt-2 grid grid-cols-2 gap-2"></div>
@@ -95,27 +87,15 @@
 
         <!-- Площадь -->
         <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
-          <p class="block text-sm font-medium text-slate-200">Площадь ($m^2$)</p>
+          <p class="block text-sm font-medium text-slate-200">Площадь (м²)</p>
           <div class="mt-3 grid grid-cols-2 gap-3">
             <div>
               <label for="areaMin" class="sr-only">От</label>
-              <input
-                id="areaMin"
-                inputmode="decimal"
-                type="text"
-                placeholder="От"
-                class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-              />
+              <input id="areaMin" inputmode="decimal" type="text" placeholder="От" class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
             </div>
             <div>
               <label for="areaMax" class="sr-only">До</label>
-              <input
-                id="areaMax"
-                inputmode="decimal"
-                type="text"
-                placeholder="До"
-                class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-              />
+              <input id="areaMax" inputmode="decimal" type="text" placeholder="До" class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
             </div>
           </div>
         </section>
@@ -126,28 +106,16 @@
           <div class="mt-3 grid grid-cols-2 gap-3">
             <div>
               <label for="priceMin" class="sr-only">От</label>
-              <input
-                id="priceMin"
-                inputmode="numeric"
-                type="text"
-                placeholder="От"
-                class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-              />
+              <input id="priceMin" inputmode="numeric" type="text" placeholder="От" class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
             </div>
             <div>
               <label for="priceMax" class="sr-only">До</label>
-              <input
-                id="priceMax"
-                inputmode="numeric"
-                type="text"
-                placeholder="До"
-                class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-              />
+              <input id="priceMax" inputmode="numeric" type="text" placeholder="До" class="w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
             </div>
           </div>
         </section>
 
-        <!-- Дополнительные параметры (Accordion) -->
+        <!-- Дополнительные параметры -->
         <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
           <details id="additionalParamsDetails" open>
             <summary class="cursor-pointer list-none select-none">
@@ -156,48 +124,25 @@
                 <span class="text-xs text-slate-500">Открыть/свернуть</span>
               </div>
             </summary>
-
             <div class="mt-4 grid gap-3">
               <div class="grid grid-cols-2 gap-3">
                 <div>
                   <label for="floorMin" class="block text-xs text-slate-400">Этаж (от)</label>
-                  <input
-                    id="floorMin"
-                    inputmode="numeric"
-                    type="text"
-                    placeholder="Напр. 1"
-                    class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-                  />
+                  <input id="floorMin" inputmode="numeric" type="text" placeholder="Напр. 1" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
                 </div>
                 <div>
                   <label for="floorMax" class="block text-xs text-slate-400">Этаж (до)</label>
-                  <input
-                    id="floorMax"
-                    inputmode="numeric"
-                    type="text"
-                    placeholder="Напр. 9"
-                    class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-                  />
+                  <input id="floorMax" inputmode="numeric" type="text" placeholder="Напр. 9" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
                 </div>
               </div>
-
               <div class="grid grid-cols-2 gap-3">
                 <div>
-                  <label for="bathrooms" class="block text-xs text-slate-400">Санузел</label>
-                  <input
-                    id="bathrooms"
-                    inputmode="numeric"
-                    type="text"
-                    placeholder="Напр. 1"
-                    class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-                  />
+                  <label for="bathroomsFilter" class="block text-xs text-slate-400">Санузел</label>
+                  <input id="bathroomsFilter" inputmode="numeric" type="text" placeholder="Напр. 1" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
                 </div>
                 <div>
-                  <label for="renovation" class="block text-xs text-slate-400">Ремонт</label>
-                  <select
-                    id="renovation"
-                    class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"
-                  >
+                  <label for="renovationFilter" class="block text-xs text-slate-400">Ремонт</label>
+                  <select id="renovationFilter" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60">
                     <option value="" selected>Любой</option>
                     <option value="new">Новый</option>
                     <option value="good">Хороший</option>
@@ -206,56 +151,240 @@
                   </select>
                 </div>
               </div>
-
-              <p class="text-xs text-slate-500">
-                Эти поля пока передаются как `additional_params`. Позже парсер сможет использовать их точнее.
-              </p>
             </div>
           </details>
         </section>
       </div>
-    </div>
 
-    <!-- Фиксированная кнопка сохранения -->
-    <div class="fixed bottom-0 inset-x-0 border-t border-slate-800 bg-slate-950/90 backdrop-blur">
-      <div class="mx-auto max-w-lg px-4 py-3">
-        <button
-          id="saveBtn"
-          type="button"
-          class="w-full rounded-2xl bg-sky-500 px-4 py-4 text-base font-semibold text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 active:bg-sky-300"
-        >
-          Сохранить
-        </button>
+      <!-- Кнопка сохранения -->
+      <div class="fixed bottom-16 inset-x-0 border-t border-slate-800 bg-slate-950/90 backdrop-blur">
+        <div class="mx-auto max-w-lg px-4 py-3">
+          <button id="saveBtn" type="button" class="w-full rounded-2xl bg-sky-500 px-4 py-4 text-base font-semibold text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 active:bg-sky-300">Сохранить фильтр</button>
+        </div>
       </div>
     </div>
 
+    <!-- SECTION: ОЦЕНКА -->
+    <div id="section-valuation" class="section hidden-section mx-auto max-w-lg px-4 pt-6">
+      <header class="mb-5">
+        <div class="flex items-center justify-between">
+          <h1 class="text-2xl font-semibold tracking-tight">Оценка стоимости</h1>
+        </div>
+        <p class="mt-2 text-sm text-slate-400">Выберите метод оценки и заполните параметры</p>
+      </header>
+
+      <!-- Метод оценки -->
+      <section class="mb-4 rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+        <p class="block text-sm font-medium text-slate-200 mb-3">Метод оценки</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="tabById" type="button" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700 active" data-method="by_id">По ID</button>
+          <button id="tabByParams" type="button" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700" data-method="by_params">По параметрам</button>
+        </div>
+      </section>
+
+      <!-- Форма по ID -->
+      <div id="formById" class="space-y-4">
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <label for="adId" class="block text-sm font-medium text-slate-200">ID объявления OLX</label>
+          <input id="adId" type="text" placeholder="Например: 12345678" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+        </section>
+      </div>
+
+      <!-- Форма по параметрам -->
+      <div id="formByParams" class="space-y-4 hidden">
+        <!-- Тип объявления -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <p class="block text-sm font-medium text-slate-200">Тип объявления *</p>
+          <div class="mt-3 grid grid-cols-2 gap-2">
+            <button id="tabSaleVal" type="button" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700 active" data-type="sale">Продажа</button>
+            <button id="tabRentVal" type="button" class="rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700" data-type="rent">Аренда</button>
+          </div>
+        </section>
+
+        <!-- Тип жилья -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <p class="block text-sm font-medium text-slate-200">Тип жилья *</p>
+          <div class="mt-3 grid grid-cols-2 gap-2">
+            <button id="typeNew" type="button" class="housing-type-btn rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700 active" data-value="new">Новостройки</button>
+            <button id="typeSecondary" type="button" class="housing-type-btn rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700" data-value="secondary">Вторичный рынок</button>
+          </div>
+        </section>
+
+        <!-- Меблировка -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <div class="flex items-center justify-between">
+            <span class="text-sm font-medium text-slate-200">Меблировка *</span>
+            <label class="relative inline-flex items-center cursor-pointer">
+              <input type="checkbox" id="furnished" class="sr-only peer">
+              <div class="w-11 h-6 bg-slate-700 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-sky-500"></div>
+            </label>
+          </div>
+        </section>
+
+        <!-- Комнаты -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <label for="rooms" class="block text-sm font-medium text-slate-200">Количество комнат *</label>
+          <input id="rooms" type="text" inputmode="numeric" placeholder="Например: 2" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+        </section>
+
+        <!-- Площадь -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <label for="area" class="block text-sm font-medium text-slate-200">Общая площадь (м²) *</label>
+          <input id="area" type="text" inputmode="decimal" placeholder="Например: 65.5" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+        </section>
+
+        <!-- Этаж -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <label for="floor" class="block text-sm font-medium text-slate-200">Этаж *</label>
+          <input id="floor" type="text" inputmode="numeric" placeholder="Например: 5" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+        </section>
+
+        <!-- Этажность дома -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <label for="totalFloors" class="block text-sm font-medium text-slate-200">Этажность дома *</label>
+          <input id="totalFloors" type="text" inputmode="numeric" placeholder="Например: 9" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+        </section>
+
+        <!-- Район -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <label for="district" class="block text-sm font-medium text-slate-200">Район *</label>
+          <select id="district" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60">
+            <option value="">Выберите район</option>
+            <option value="yashnabadskiy">Яшнободский</option>
+            <option value="yunusabadskiy">Юнусабадский</option>
+            <option value="mirzoulugbek">Мирзо-Улугбекский</option>
+            <option value="chilanzarskiy">Чиланзарский</option>
+            <option value="yakkasarayskiy">Яккасарайский</option>
+            <option value="shaykhontohur">Шайхантахурский</option>
+            <option value="sergeli">Сергелийский</option>
+            <option value="bektemir">Бектемирский</option>
+            <option value="miraabad">Мирабадский</option>
+            <option value="olmazar">Алмазарский</option>
+            <option value="uchtepa">Учтепинский</option>
+          </select>
+        </section>
+
+        <!-- Расположение на карте -->
+        <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+          <p class="block text-sm font-medium text-slate-200 mb-2">Расположение на карте</p>
+          <p class="text-xs text-slate-500 mb-3">Нажмите на карту, чтобы указать местоположение</p>
+          <div class="rounded-xl overflow-hidden border border-slate-800">
+            <iframe src="https://www.google.com/maps/embed?pb=!1m18!1m12!1m3!1d191986.79467197507!2d69.06353305!3d41.2994958!2m3!1f0!2f0!3f0!3m2!1i1024!2i768!4f13.1!3m3!1m2!1s0x38ae8b0cc379e9c3%3A0xa5a9323b4c5e3b6a!2sTashkent%2C%20Uzbekistan!5e0!3m2!1sen!2s!4v1700000000000!5m2!1sen!2s" width="100%" height="200" style="border:0;" allowfullscreen="" loading="lazy" referrerpolicy="no-referrer-when-downgrade"></iframe>
+          </div>
+          <input id="location" type="text" placeholder="Адрес или координаты" class="mt-3 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+        </section>
+      </div>
+
+      <!-- Дополнительные параметры -->
+      <section class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4">
+        <details id="additionalParamsValDetails">
+          <summary class="cursor-pointer list-none select-none">
+            <div class="flex items-center justify-between gap-3">
+              <span class="text-sm font-medium text-slate-200">Дополнительные параметры</span>
+              <span class="text-xs text-slate-500">Открыть/свернуть</span>
+            </div>
+          </summary>
+          <div class="mt-4 grid gap-3">
+            <div>
+              <label for="bathrooms" class="block text-xs text-slate-400">Санузел</label>
+              <input id="bathrooms" inputmode="numeric" type="text" placeholder="Напр. 1" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+            </div>
+            <div>
+              <label for="renovation" class="block text-xs text-slate-400">Ремонт</label>
+              <select id="renovation" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60">
+                <option value="" selected>Любой</option>
+                <option value="new">Новый</option>
+                <option value="good">Хороший</option>
+                <option value="cosmetic">Косметический</option>
+                <option value="needs_repair">Требует ремонта</option>
+              </select>
+            </div>
+            <div>
+              <label for="buildingYear" class="block text-xs text-slate-400">Год постройки</label>
+              <input id="buildingYear" inputmode="numeric" type="text" placeholder="Напр. 2020" class="mt-2 w-full rounded-xl bg-slate-950 px-3 py-2 text-slate-100 placeholder:text-slate-600 outline-none ring-1 ring-slate-800 focus:ring-2 focus:ring-sky-500/60"/>
+            </div>
+          </div>
+        </details>
+      </section>
+
+      <!-- Кнопка оценки -->
+      <div class="fixed bottom-16 inset-x-0 border-t border-slate-800 bg-slate-950/90 backdrop-blur">
+        <div class="mx-auto max-w-lg px-4 py-3">
+          <button id="evaluateBtn" type="button" class="w-full rounded-2xl bg-sky-500 px-4 py-4 text-base font-semibold text-white shadow-lg shadow-sky-500/20 transition hover:bg-sky-400 active:bg-sky-300">Оценить стоимость</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- SECTION: ИСТОРИЯ -->
+    <div id="section-history" class="section hidden-section mx-auto max-w-lg px-4 pt-6">
+      <header class="mb-5">
+        <div class="flex items-center justify-between">
+          <h1 class="text-2xl font-semibold tracking-tight">История</h1>
+        </div>
+        <p class="mt-2 text-sm text-slate-400">Ваши сохраненные фильтры и оценки</p>
+      </header>
+
+      <div id="historyList" class="space-y-3">
+        <div class="rounded-2xl border border-slate-800 bg-slate-900/40 p-4 text-center">
+          <p class="text-slate-500">История пока пуста</p>
+          <p class="text-xs text-slate-600 mt-1">Сохраненные фильтры и оценки появятся здесь</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- BOTTOM NAVIGATION -->
+    <nav class="fixed bottom-0 inset-x-0 bg-slate-950 border-t border-slate-800">
+      <div class="mx-auto max-w-lg">
+        <div class="grid grid-cols-3">
+          <button onclick="switchTab('filters')" class="nav-btn active-tab flex flex-col items-center py-3 text-slate-500 hover:text-slate-300 transition" data-tab="filters">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-1"><line x1="21" y1="10" x2="3" y2="10"></line><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="14" x2="3" y2="14"></line><line x1="21" y1="18" x2="3" y2="18"></line></svg>
+            <span class="text-xs">Фильтры</span>
+          </button>
+          <button onclick="switchTab('valuation')" class="nav-btn flex flex-col items-center py-3 text-slate-500 hover:text-slate-300 transition" data-tab="valuation">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-1"><polyline points="23 6 13.5 15.5 8.5 10.5 1 18"></polyline><polyline points="17 6 23 6 23 12"></polyline></svg>
+            <span class="text-xs">Оценка</span>
+          </button>
+          <button onclick="switchTab('history')" class="nav-btn flex flex-col items-center py-3 text-slate-500 hover:text-slate-300 transition" data-tab="history">
+            <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mb-1"><circle cx="12" cy="12" r="10"></circle><polyline points="12 6 12 12 16 14"></polyline></svg>
+            <span class="text-xs">История</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+
     <script>
-      function qs(id) {
-        return document.getElementById(id);
-      }
+      // Telegram WebApp
+      const tg = window.Telegram.WebApp;
+      tg.ready();
+      tg.expand();
+
+      function qs(id) { return document.getElementById(id); }
 
       function normalizeNumber(value) {
         if (value === null || value === undefined) return null;
         const trimmed = String(value).trim();
         if (!trimmed) return null;
-        // allow user to type spaces and commas
-        const cleaned = trimmed.replace(/\\s+/g, "").replace(",", ".");
+        const cleaned = trimmed.replace(/\s+/g, "").replace(",", ".");
         const num = Number(cleaned);
         return Number.isFinite(num) ? num : null;
       }
-
       function normalizeInt(value) {
         const num = normalizeNumber(value);
         if (num === null) return null;
         return Math.trunc(num);
       }
 
-      // Telegram WebApp init
-      const tg = window.Telegram.WebApp;
-      tg.ready();
-      tg.expand();
+      // TAB SWITCHING
+      function switchTab(tabName) {
+        document.querySelectorAll('.section').forEach(s => s.classList.add('hidden-section'));
+        document.querySelectorAll('.nav-btn').forEach(b => b.classList.remove('active-tab'));
+        
+        qs('section-' + tabName).classList.remove('hidden-section');
+        document.querySelector('[data-tab="' + tabName + '"]').classList.add('active-tab');
+      }
 
-      // OLX slugs for region/city selectors
+      // ===================== FILTERS SECTION =====================
+      // Cities
       const olxLocations = {
         tashkent: [
           { label: "Яшнободский", value: "yashnabadskiy" },
@@ -278,8 +407,7 @@
           const btn = document.createElement("button");
           btn.type = "button";
           btn.dataset.city = c.value;
-          btn.className =
-            "rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700";
+          btn.className = "rounded-xl border border-slate-800 bg-slate-950/60 px-3 py-2 text-sm font-medium text-slate-300 transition hover:border-slate-700";
           btn.textContent = c.label;
           btn.addEventListener("click", () => toggleCity(c.value, btn));
           cityGrid.appendChild(btn);
@@ -297,36 +425,31 @@
         btn.classList.add("active");
       }
 
-      regionSelect.addEventListener("change", () => {
-        renderCitiesForRegion(regionSelect.value);
-      });
+      regionSelect.addEventListener("change", () => renderCitiesForRegion(regionSelect.value));
       renderCitiesForRegion(regionSelect.value);
 
-      // Tabs (rent/sale)
+      // Rent/Sale tabs
       const tabRent = qs("tabRent");
       const tabSale = qs("tabSale");
       let adType = "rent";
-
       function selectType(type) {
         [tabRent, tabSale].forEach((b) => b.classList.remove("active"));
         if (type === "sale") {
           tabSale.classList.add("active");
           adType = "sale";
-          return;
+        } else {
+          tabRent.classList.add("active");
+          adType = "rent";
         }
-        tabRent.classList.add("active");
-        adType = "rent";
       }
-
       tabRent.addEventListener("click", () => selectType("rent"));
       tabSale.addEventListener("click", () => selectType("sale"));
       selectType("rent");
 
-      // Rooms buttons (multi select)
+      // Rooms
       const roomBtns = Array.from(document.querySelectorAll(".roomBtn"));
       let selectedRooms = [];
       const roomsValue = qs("roomsValue");
-
       function toggleRoom(newRooms) {
         const exists = selectedRooms.includes(newRooms);
         if (exists) {
@@ -342,39 +465,24 @@
           ? selectedRooms.map((value) => (value === 5 ? "5+" : String(value))).join(", ")
           : "—";
       }
-
       roomBtns.forEach((btn) => {
-        btn.addEventListener("click", () => {
-          const v = Number(btn.dataset.rooms);
-          toggleRoom(v);
-        });
+        btn.addEventListener("click", () => toggleRoom(Number(btn.dataset.rooms)));
       });
       roomsValue.textContent = "—";
 
-      function buildAdditionalParams() {
-        const floorMin = normalizeInt(qs("floorMin").value);
-        const floorMax = normalizeInt(qs("floorMax").value);
-        const bathrooms = normalizeInt(qs("bathrooms").value);
-        const renovation = qs("renovation").value || null;
-
-        const additional = {};
-        if (floorMin !== null) additional.floor_min = floorMin;
-        if (floorMax !== null) additional.floor_max = floorMax;
-        if (bathrooms !== null) additional.bathrooms = bathrooms;
-        if (renovation !== null) additional.renovation = renovation;
-        return additional;
-      }
-
-      function buildPayload() {
+      // Save Filter
+      qs("saveBtn").addEventListener("click", () => {
         const name = (qs("filterName").value || "").trim() || null;
-
         const areaMin = normalizeNumber(qs("areaMin").value);
         const areaMax = normalizeNumber(qs("areaMax").value);
-
         const priceMin = normalizeInt(qs("priceMin").value);
         const priceMax = normalizeInt(qs("priceMax").value);
+        const floorMin = normalizeInt(qs("floorMin").value);
+        const floorMax = normalizeInt(qs("floorMax").value);
+        const bathrooms = normalizeInt(qs("bathroomsFilter").value);
+        const renovation = qs("renovationFilter").value || null;
 
-        return {
+        const payload = {
           filter: {
             name: name,
             type: adType,
@@ -385,24 +493,105 @@
             area_max: areaMax,
             price_min: priceMin,
             price_max: priceMax,
-            additional_params: buildAdditionalParams(),
-          },
+            additional_params: {}
+          }
         };
-      }
+        if (floorMin !== null) payload.filter.additional_params.floor_min = floorMin;
+        if (floorMax !== null) payload.filter.additional_params.floor_max = floorMax;
+        if (bathrooms !== null) payload.filter.additional_params.bathrooms = bathrooms;
+        if (renovation !== null) payload.filter.additional_params.renovation = renovation;
 
-      const saveBtn = qs("saveBtn");
-      saveBtn.addEventListener("click", () => {
-        const payload = buildPayload();
-        const dataStr = JSON.stringify(payload);
-        console.log("ОТПРАВКА:", dataStr);
-
-        if (!tg || typeof tg.sendData !== "function") {
-          console.log("Telegram WebApp не доступен: sendData недоступен");
-          return;
+        if (tg && typeof tg.sendData === "function") {
+          tg.sendData(JSON.stringify(payload));
         }
-        tg.sendData(dataStr);
+      });
+
+      // ===================== VALUATION SECTION =====================
+      const tabById = qs("tabById");
+      const tabByParams = qs("tabByParams");
+      const formById = qs("formById");
+      const formByParams = qs("formByParams");
+      let currentMethod = "by_id";
+
+      function selectMethod(method) {
+        if (method === "by_params") {
+          tabByParams.classList.add("active");
+          tabById.classList.remove("active");
+          formByParams.classList.remove("hidden");
+          formById.classList.add("hidden");
+          currentMethod = "by_params";
+        } else {
+          tabById.classList.add("active");
+          tabByParams.classList.remove("active");
+          formById.classList.remove("hidden");
+          formByParams.classList.add("hidden");
+          currentMethod = "by_id";
+        }
+      }
+      tabById.addEventListener("click", () => selectMethod("by_id"));
+      tabByParams.addEventListener("click", () => selectMethod("by_params"));
+
+      // Type in valuation
+      const tabSaleVal = qs("tabSaleVal");
+      const tabRentVal = qs("tabRentVal");
+      let adTypeVal = "sale";
+      function selectTypeVal(type) {
+        if (type === "sale") {
+          tabSaleVal.classList.add("active");
+          tabRentVal.classList.remove("active");
+          adTypeVal = "sale";
+        } else {
+          tabRentVal.classList.add("active");
+          tabSaleVal.classList.remove("active");
+          adTypeVal = "rent";
+        }
+      }
+      tabSaleVal.addEventListener("click", () => selectTypeVal("sale"));
+      tabRentVal.addEventListener("click", () => selectTypeVal("rent"));
+
+      // Housing type
+      const typeNew = qs("typeNew");
+      const typeSecondary = qs("typeSecondary");
+      let housingType = "new";
+      function selectHousingType(type) {
+        if (type === "new") {
+          typeNew.classList.add("active");
+          typeSecondary.classList.remove("active");
+          housingType = "new";
+        } else {
+          typeSecondary.classList.add("active");
+          typeNew.classList.remove("active");
+          housingType = "secondary";
+        }
+      }
+      typeNew.addEventListener("click", () => selectHousingType("new"));
+      typeSecondary.addEventListener("click", () => selectHousingType("secondary"));
+
+      // Evaluate button
+      qs("evaluateBtn").addEventListener("click", () => {
+        const basePayload = { valuation: { method: currentMethod } };
+        if (currentMethod === "by_id") {
+          basePayload.valuation.ad_id = (qs("adId").value || "").trim() || null;
+        } else {
+          basePayload.valuation.params = {
+            type: adTypeVal,
+            housing_type: housingType,
+            rooms: normalizeInt(qs("rooms").value),
+            area: normalizeNumber(qs("area").value),
+            floor: normalizeInt(qs("floor").value),
+            total_floors: normalizeInt(qs("totalFloors").value),
+            district: qs("district").value || null,
+            location: (qs("location").value || "").trim() || null,
+            furnished: qs("furnished").checked,
+            bathrooms: normalizeInt(qs("bathrooms").value),
+            renovation: qs("renovation").value || null,
+            building_year: normalizeInt(qs("buildingYear").value),
+          };
+        }
+        if (tg && typeof tg.sendData === "function") {
+          tg.sendData(JSON.stringify(basePayload));
+        }
       });
     </script>
   </body>
 </html>
-

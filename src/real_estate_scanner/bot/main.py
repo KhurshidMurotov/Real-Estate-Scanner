@@ -51,7 +51,6 @@ async def start_handler(message: Message) -> None:
     logger.info("start_handler: from_id=%s username=%s", message.from_user.id, message.from_user.username)
 
     webapp_url = settings.MINI_APP_URL
-    valuation_url = settings.VALUATION_APP_URL
     async with AsyncSessionLocal() as session:
         state = await get_sale_broadcast_state(session, message.from_user.id)
     if state and state.is_active:
@@ -60,7 +59,6 @@ async def start_handler(message: Message) -> None:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=LEGACY_FILTER_BUTTON, web_app=WebAppInfo(url=webapp_url))],
-            [KeyboardButton(text=VALUATION_BUTTON, web_app=WebAppInfo(url=valuation_url))],
             [KeyboardButton(text=SALE_BROADCAST_BUTTON), KeyboardButton(text=STOP_BUTTON)],
         ],
         resize_keyboard=True,
