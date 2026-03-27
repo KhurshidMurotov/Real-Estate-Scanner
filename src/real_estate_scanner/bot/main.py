@@ -36,7 +36,6 @@ from real_estate_scanner.parser.worker import (
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
 LEGACY_FILTER_BUTTON = "Подобрать недвижимость"
-VALUATION_BUTTON = "Оценка стоимости"
 
 router = Router()
 
