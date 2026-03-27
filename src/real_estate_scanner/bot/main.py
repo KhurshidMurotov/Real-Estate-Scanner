@@ -36,6 +36,7 @@ from real_estate_scanner.parser.worker import (
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
 LEGACY_FILTER_BUTTON = "Подобрать недвижимость"
+VALUATION_BUTTON = "Оценка стоимости"
 
 router = Router()
 
@@ -50,6 +51,7 @@ async def start_handler(message: Message) -> None:
     logger.info("start_handler: from_id=%s username=%s", message.from_user.id, message.from_user.username)
 
     webapp_url = settings.MINI_APP_URL
+    valuation_url = settings.VALUATION_APP_URL
     async with AsyncSessionLocal() as session:
         state = await get_sale_broadcast_state(session, message.from_user.id)
     if state and state.is_active:
@@ -58,6 +60,7 @@ async def start_handler(message: Message) -> None:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=LEGACY_FILTER_BUTTON, web_app=WebAppInfo(url=webapp_url))],
+            [KeyboardButton(text=VALUATION_BUTTON, web_app=WebAppInfo(url=valuation_url))],
             [KeyboardButton(text=SALE_BROADCAST_BUTTON), KeyboardButton(text=STOP_BUTTON)],
         ],
         resize_keyboard=True,
@@ -83,9 +86,15 @@ async def webapp_data_handler(message: Message) -> None:
         await message.answer("Ошибка: неверный формат данных. Попробуйте ещё раз.")
         return
 
+    # Обработка данных оценки стоимости
+    valuation_data = payload.get("valuation")
+    if valuation_data is not None:
+        await handle_valuation_data(message, valuation_data)
+        return
+
     filter_data: Any = payload.get("filter")
     if filter_data is None:
-        await message.answer("Ошибка: отсутствует `filter` в данных.")
+        await message.answer("Ошибка: отсутствует `filter` или `valuation` в данных.")
         return
 
     try:
@@ -120,6 +129,38 @@ async def webapp_data_handler(message: Message) -> None:
         return
 
     await message.answer(f"✅ Мониторинг запущен! Ищу: {filter_schema.type}")
+
+
+async def handle_valuation_data(message: Message, valuation_data: dict) -> None:
+    """Обработчик данных оценки стоимости недвижимости."""
+    method = valuation_data.get("method", "by_id")
+    
+    if method == "by_id":
+        ad_id = valuation_data.get("ad_id")
+        if ad_id:
+            await message.answer(f"📊 Запрос на оценку по ID: {ad_id}\n\nОбработка запроса...")
+        else:
+            await message.answer("❌ Ошибка: ID объявления не указан.")
+    else:
+        params = valuation_data.get("params", {})
+        rooms = params.get("rooms")
+        area = params.get("area")
+        district = params.get("district")
+        ad_type = "Продажа" if params.get("type") == "sale" else "Аренда"
+        housing = "Новостройка" if params.get("housing_type") == "new" else "Вторичка"
+        
+        summary = f"📊 Параметры для оценки:\n"
+        summary += f"• Тип: {ad_type}\n"
+        summary += f"• Жильё: {housing}\n"
+        if rooms:
+            summary += f"• Комнат: {rooms}\n"
+        if area:
+            summary += f"• Площадь: {area} м²\n"
+        if district:
+            summary += f"• Район: {district}\n"
+        summary += f"\n🔄 Запрос отправлен на оценку..."
+        
+        await message.answer(summary)
 
 
 @router.message(F.text == SALE_BROADCAST_BUTTON)

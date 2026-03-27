@@ -19,6 +19,9 @@ class Settings(BaseSettings):
     # Telegram Mini App URL (must be public HTTPS for Telegram)
     MINI_APP_URL: str = "https://khurshidmurotov.github.io/Real-Estate-Scanner/"
 
+    # Valuation Mini App URL
+    VALUATION_APP_URL: str = "https://khurshidmurotov.github.io/Real-Estate-Scanner/valuation.html"
+
     # If OLX price is in UZS (сум), but user entered price as USD in the Mini App,
     # we can try a fallback matching with currency conversion.
     # Conversion is only used if the first matching attempt returns no users.

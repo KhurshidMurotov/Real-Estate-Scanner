@@ -1,0 +1,16 @@
+Metadata-Version: 2.2
+Name: real-estate-scanner
+Version: 0.1.0
+Summary: Telegram bot + Mini App + OLX scraper
+Requires-Python: >=3.11
+Requires-Dist: SQLAlchemy<3.0,>=2.0
+Requires-Dist: asyncpg<1.0,>=0.29
+Requires-Dist: alembic<2.0,>=1.13
+Requires-Dist: aiogram<4.0,>=3.0
+Requires-Dist: playwright<2.0,>=1.40.0
+Requires-Dist: playwright-stealth<3.0,>=2.0.0
+Requires-Dist: pydantic<3.0,>=2.6
+Requires-Dist: pydantic-settings<3.0,>=2.2
+Requires-Dist: python-dotenv<2.0,>=1.0
+Requires-Dist: pytest<9.0,>=8.0
+Requires-Dist: pytest-asyncio<1.0,>=0.23
