@@ -32,6 +32,11 @@ from real_estate_scanner.parser.worker import (
     run_worker,
     send_sale_broadcast_batch,
 )
+from real_estate_scanner.valuation import (
+    ValuationParams,
+    estimate_property_value,
+    format_valuation_message,
+)
 
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
@@ -135,29 +140,65 @@ async def handle_valuation_data(message: Message, valuation_data: dict) -> None:
     if method == "by_id":
         ad_id = valuation_data.get("ad_id")
         if ad_id:
-            await message.answer(f"📊 Запрос на оценку по ID: {ad_id}\n\nОбработка запроса...")
+            await message.answer(f"📊 Запрос на оценку по ID: {ad_id}\n\nПока оценка по ID не реализована. Используйте оценку по параметрам.")
         else:
             await message.answer("❌ Ошибка: ID объявления не указан.")
-    else:
-        params = valuation_data.get("params", {})
-        rooms = params.get("rooms")
-        area = params.get("area")
-        district = params.get("district")
-        ad_type = "Продажа" if params.get("type") == "sale" else "Аренда"
-        housing = "Новостройка" if params.get("housing_type") == "new" else "Вторичка"
+        return
+    
+    # Оценка по параметрам
+    params_data = valuation_data.get("params", {})
+    
+    # Проверяем обязательные поля
+    rooms = params_data.get("rooms")
+    area = params_data.get("area")
+    district = params_data.get("district")
+    floor = params_data.get("floor")
+    total_floors = params_data.get("total_floors")
+    
+    if not all([rooms, area, district, floor, total_floors]):
+        missing = []
+        if not rooms:
+            missing.append("комнаты")
+        if not area:
+            missing.append("площадь")
+        if not district:
+            missing.append("район")
+        if not floor:
+            missing.append("этаж")
+        if not total_floors:
+            missing.append("этажность дома")
+        await message.answer(f"❌ Ошибка: не заполнены обязательные поля: {', '.join(missing)}")
+        return
+    
+    # Отправляем сообщение о начале оценки
+    await message.answer("🔍 Собираю данные с OLX для оценки... Это может занять 10-20 секунд.")
+    
+    try:
+        # Создаем параметры для оценки
+        params = ValuationParams(
+            ad_type=params_data.get("type", "sale"),
+            housing_type=params_data.get("housing_type", "secondary"),
+            rooms=int(rooms),
+            area=float(area),
+            floor=int(floor),
+            total_floors=int(total_floors),
+            district=district,
+            furnished=params_data.get("furnished", False),
+            bathrooms=params_data.get("bathrooms"),
+            renovation=params_data.get("renovation"),
+            building_year=params_data.get("building_year"),
+        )
         
-        summary = f"📊 Параметры для оценки:\n"
-        summary += f"• Тип: {ad_type}\n"
-        summary += f"• Жильё: {housing}\n"
-        if rooms:
-            summary += f"• Комнат: {rooms}\n"
-        if area:
-            summary += f"• Площадь: {area} м²\n"
-        if district:
-            summary += f"• Район: {district}\n"
-        summary += f"\n🔄 Запрос отправлен на оценку..."
+        # Выполняем оценку
+        result = await estimate_property_value(params)
         
-        await message.answer(summary)
+        # Форматируем и отправляем результат
+        message_text = format_valuation_message(result, params)
+        await message.answer(message_text, parse_mode="Markdown")
+        
+    except Exception as e:
+        logger.exception("Ошибка при оценке стоимости")
+        await message.answer(f"❌ Ошибка при оценке: {str(e)}\n\nПопробуйте позже.")
 
 
 @router.message(F.text == SALE_BROADCAST_BUTTON)
