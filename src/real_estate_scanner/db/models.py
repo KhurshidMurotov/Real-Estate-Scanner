@@ -99,6 +99,11 @@ class Ad(Base):
         nullable=False,
         server_default=func.now(),
     )
+    is_enriched: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
 
     # Legacy compatibility fields kept for older code paths.
     link: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -120,6 +125,21 @@ class SaleBroadcastState(Base):
         primary_key=True,
     )
     is_active: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    apartments_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    commercial_enabled: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        server_default=text("false"),
+    )
+    is_paused: Mapped[bool] = mapped_column(
         Boolean,
         nullable=False,
         server_default=text("false"),

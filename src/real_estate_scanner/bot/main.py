@@ -7,55 +7,39 @@ sys.path.append(str(Path(__file__).resolve().parents[2]))
 
 import asyncio
 import logging
-from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import datetime
 from logging.handlers import TimedRotatingFileHandler
 from zoneinfo import ZoneInfo
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.filters import CommandStart
+from aiogram.filters import Command, CommandStart
 from aiogram.types import KeyboardButton, Message, ReplyKeyboardMarkup
 
 from real_estate_scanner.config import settings
 from real_estate_scanner.db.crud import (
     get_sale_broadcast_state,
-    get_user_notifications_enabled,
-    toggle_user_notifications_enabled,
     upsert_sale_broadcast_state,
     upsert_user,
 )
 from real_estate_scanner.db.init_db import init_db
+from real_estate_scanner.db.models import SaleBroadcastState
 from real_estate_scanner.db.session import AsyncSessionLocal
 from real_estate_scanner.parser.worker import (
     APARTMENTS_BUTTON,
     COMMERCIAL_BUTTON,
+    SCRAPING_LOOP_DELAY_SECONDS,
     SEND_INTERVAL_SECONDS,
     STOP_BUTTON,
-    build_apartments_sale_snapshot,
-    build_commercial_snapshot,
-    filter_ads_for_window,
-    is_initial_scan_active,
+    run_scraping_pass,
     run_worker,
+    send_broadcast_step_for_user,
 )
 
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
-_broadcast_starting_users: set[int] = set()
-_broadcast_stop_requested_users: set[int] = set()
-NOTIFICATIONS_OFF_BUTTON = "🔇 Выключить уведомления"
-NOTIFICATIONS_ON_BUTTON = "🔔 Включить уведомления"
+_scraping_task: asyncio.Task | None = None
 
 router = Router()
-
-
-def _serialize_ads(ads):
-    return [
-        {
-            **asdict(ad),
-            "published_at": ad.published_at.isoformat() if ad.published_at else None,
-        }
-        for ad in ads
-    ]
 
 
 def _setup_logging() -> None:
@@ -87,48 +71,215 @@ def _setup_logging() -> None:
     root_logger.addHandler(file_handler)
 
 
-async def _should_abort_start(user_id: int) -> bool:
-    return user_id in _broadcast_stop_requested_users
-
-
-def _notifications_button_text(enabled: bool) -> str:
-    return NOTIFICATIONS_OFF_BUTTON if enabled else NOTIFICATIONS_ON_BUTTON
-
-
-def _build_keyboard(*, notifications_enabled: bool) -> ReplyKeyboardMarkup:
+def _build_keyboard() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text=APARTMENTS_BUTTON)],
             [KeyboardButton(text=COMMERCIAL_BUTTON)],
             [KeyboardButton(text=STOP_BUTTON)],
-            [KeyboardButton(text=_notifications_button_text(notifications_enabled))],
         ],
         resize_keyboard=True,
         one_time_keyboard=False,
     )
 
 
-async def _replace_user_broadcast(
+def _state_payload(
     *,
     user_id: int,
-    total_found: int,
-    pending_ads: list[dict],
-    window_start: datetime,
-    window_end: datetime,
+    existing: SaleBroadcastState | None,
+    is_active: bool | None = None,
+    apartments_enabled: bool | None = None,
+    commercial_enabled: bool | None = None,
+    is_paused: bool | None = None,
+    started_at=None,
+    window_start=None,
+    window_end=None,
+    last_batch_at=None,
+    total_found: int | None = None,
+    pending_ads: list[dict] | None = None,
+    sent_olx_ids: list[str] | None = None,
+) -> dict:
+    return {
+        "user_id": user_id,
+        "is_active": bool(existing.is_active) if is_active is None and existing else bool(is_active),
+        "apartments_enabled": bool(existing.apartments_enabled) if apartments_enabled is None and existing else bool(apartments_enabled),
+        "commercial_enabled": bool(existing.commercial_enabled) if commercial_enabled is None and existing else bool(commercial_enabled),
+        "is_paused": bool(existing.is_paused) if is_paused is None and existing else bool(is_paused),
+        "started_at": existing.started_at if started_at is None and existing else started_at,
+        "window_start": existing.window_start if window_start is None and existing else window_start,
+        "window_end": existing.window_end if window_end is None and existing else window_end,
+        "last_batch_at": existing.last_batch_at if last_batch_at is None and existing else last_batch_at,
+        "total_found": int(existing.total_found) if total_found is None and existing else int(total_found or 0),
+        "pending_ads": list(existing.pending_ads or []) if pending_ads is None and existing else list(pending_ads or []),
+        "sent_olx_ids": list(existing.sent_olx_ids or []) if sent_olx_ids is None and existing else list(sent_olx_ids or []),
+    }
+
+
+async def _ensure_broadcast_state(session, *, user_id: int, username: str | None) -> SaleBroadcastState:
+    await upsert_user(session=session, user_id=user_id, username=username)
+    state = await get_sale_broadcast_state(session, user_id)
+    if state is not None:
+        return state
+    await upsert_sale_broadcast_state(
+        session,
+        **_state_payload(user_id=user_id, existing=None),
+    )
+    state = await get_sale_broadcast_state(session, user_id)
+    assert state is not None
+    return state
+
+
+async def _run_scraping_loop() -> None:
+    global _scraping_task
+    try:
+        logger.info("Global scraping loop started")
+        while True:
+            await run_scraping_pass()
+            await asyncio.sleep(SCRAPING_LOOP_DELAY_SECONDS)
+    except asyncio.CancelledError:
+        logger.info("Global scraping loop cancelled")
+        raise
+    except Exception:
+        logger.exception("Global scraping loop failed")
+    finally:
+        _scraping_task = None
+
+
+def _scraping_running() -> bool:
+    return _scraping_task is not None and not _scraping_task.done()
+
+
+async def _activate_subscription(
+    *,
+    message: Message,
+    enable_apartments: bool = False,
+    enable_commercial: bool = False,
 ) -> None:
+    user_id = message.from_user.id
+    now = datetime.now(_LOCAL_TZ)
+
     async with AsyncSessionLocal() as session:
+        state = await _ensure_broadcast_state(session, user_id=user_id, username=message.from_user.username)
+        requested_already_enabled = (
+            (enable_apartments and state.apartments_enabled)
+            or (enable_commercial and state.commercial_enabled)
+        )
+
+        if state.is_paused:
+            new_apartments_enabled = bool(enable_apartments)
+            new_commercial_enabled = bool(enable_commercial)
+            await upsert_sale_broadcast_state(
+                session,
+                **_state_payload(
+                    user_id=user_id,
+                    existing=state,
+                    is_active=new_apartments_enabled or new_commercial_enabled,
+                    apartments_enabled=new_apartments_enabled,
+                    commercial_enabled=new_commercial_enabled,
+                    is_paused=False,
+                    started_at=state.started_at or now,
+                    last_batch_at=None,
+                    pending_ads=[],
+                ),
+            )
+
+            if new_apartments_enabled and new_commercial_enabled:
+                text = (
+                    f"Подписки на квартиры и коммерцию включены. Отправка идёт из базы каждые "
+                    f"{SEND_INTERVAL_SECONDS} секунд, от самого старого объявления к новому."
+                )
+            elif new_apartments_enabled:
+                text = (
+                    f"Подписка на квартиры включена. Отправка идёт из базы каждые "
+                    f"{SEND_INTERVAL_SECONDS} секунд, от самого старого объявления к новому."
+                )
+            else:
+                text = (
+                    f"Подписка на коммерцию включена. Отправка идёт из базы каждые "
+                    f"{SEND_INTERVAL_SECONDS} секунд, от самого старого объявления к новому."
+                )
+
+            await message.answer(text, reply_markup=_build_keyboard())
+            await send_broadcast_step_for_user(bot=message.bot, user_id=user_id, force=True)
+            return
+
+        if requested_already_enabled and state.is_active and not state.is_paused:
+            await upsert_sale_broadcast_state(
+                session,
+                **_state_payload(
+                    user_id=user_id,
+                    existing=state,
+                    is_active=True,
+                    is_paused=True,
+                    pending_ads=[],
+                ),
+            )
+            await message.answer(
+                "Повторное нажатие поставило рассылку на паузу. Нажмите «Стоп» ещё раз, чтобы продолжить.",
+                reply_markup=_build_keyboard(),
+            )
+            return
+
+        if requested_already_enabled and state.is_paused:
+            await message.answer(
+                "Эта подписка уже включена, но рассылка стоит на паузе. Нажмите «Стоп», чтобы продолжить.",
+                reply_markup=_build_keyboard(),
+            )
+            return
+
+        if state.is_paused or not state.is_active:
+            new_apartments_enabled = bool(enable_apartments)
+            new_commercial_enabled = bool(enable_commercial)
+        else:
+            new_apartments_enabled = state.apartments_enabled or enable_apartments
+            new_commercial_enabled = state.commercial_enabled or enable_commercial
+        changed = (
+            new_apartments_enabled != state.apartments_enabled
+            or new_commercial_enabled != state.commercial_enabled
+            or state.is_paused
+            or not state.is_active
+        )
+
+        if not changed:
+            await message.answer(
+                "Подписка уже активна.",
+                reply_markup=_build_keyboard(),
+            )
+            return
+
         await upsert_sale_broadcast_state(
             session,
-            user_id=user_id,
-            is_active=bool(pending_ads),
-            started_at=window_end,
-            window_start=window_start,
-            window_end=window_end,
-            last_batch_at=None,
-            total_found=total_found,
-            pending_ads=pending_ads,
-            sent_olx_ids=[],
+            **_state_payload(
+                user_id=user_id,
+                existing=state,
+                is_active=new_apartments_enabled or new_commercial_enabled,
+                apartments_enabled=new_apartments_enabled,
+                commercial_enabled=new_commercial_enabled,
+                is_paused=False,
+                started_at=state.started_at or now,
+                last_batch_at=None,
+                pending_ads=[],
+            ),
         )
+
+    if new_apartments_enabled and new_commercial_enabled:
+        text = (
+            f"Подписки на квартиры и коммерцию включены. Отправка идёт из базы каждые "
+            f"{SEND_INTERVAL_SECONDS} секунд, от самого старого объявления к новому."
+        )
+    elif new_apartments_enabled:
+        text = (
+            f"Подписка на квартиры включена. Отправка идёт из базы каждые "
+            f"{SEND_INTERVAL_SECONDS} секунд, от самого старого объявления к новому."
+        )
+    else:
+        text = (
+            f"Подписка на коммерцию включена. Отправка идёт из базы каждые "
+            f"{SEND_INTERVAL_SECONDS} секунд, от самого старого объявления к новому."
+        )
+
+    await message.answer(text, reply_markup=_build_keyboard())
+    await send_broadcast_step_for_user(bot=message.bot, user_id=user_id, force=True)
 
 
 @router.message(CommandStart())
@@ -136,165 +287,100 @@ async def start_handler(message: Message) -> None:
     logger.info("start_handler: from_id=%s username=%s", message.from_user.id, message.from_user.username)
     async with AsyncSessionLocal() as session:
         await upsert_user(session=session, user_id=message.from_user.id, username=message.from_user.username)
-        notifications_enabled = await get_user_notifications_enabled(session, message.from_user.id)
 
-    keyboard = _build_keyboard(notifications_enabled=notifications_enabled)
     await message.answer(
-        "\u0414\u043e\u0441\u0442\u0443\u043f\u043d\u044b \u043a\u043d\u043e\u043f\u043a\u0438: \u043a\u0432\u0430\u0440\u0442\u0438\u0440\u044b \u043d\u0430 \u043f\u0440\u043e\u0434\u0430\u0436\u0443, \u043a\u043e\u043c\u043c\u0435\u0440\u0446\u0438\u044f \u043f\u0440\u043e\u0434\u0430\u0436\u0430+\u0430\u0440\u0435\u043d\u0434\u0430, \u0441\u0442\u043e\u043f \u0438 \u043f\u0435\u0440\u0435\u043a\u043b\u044e\u0447\u0430\u0442\u0435\u043b\u044c \u0443\u0432\u0435\u0434\u043e\u043c\u043b\u0435\u043d\u0438\u0439.",
-        reply_markup=keyboard,
+        "Кнопки работают как подписки на рассылку из базы данных. "
+        "Скрапинг запускается командой /start_scraping, а /reset очищает историю уже отправленных объявлений.",
+        reply_markup=_build_keyboard(),
     )
+
+
+@router.message(Command("start_scraping"))
+async def start_scraping_handler(message: Message) -> None:
+    global _scraping_task
+    if _scraping_running():
+        await message.answer("Скрапинг уже запущен.", reply_markup=_build_keyboard())
+        return
+
+    _scraping_task = asyncio.create_task(_run_scraping_loop())
+    await message.answer(
+        "Скрапинг запущен: сначала продажа квартир, потом продажа коммерции, потом аренда коммерции.",
+        reply_markup=_build_keyboard(),
+    )
+
+
+@router.message(Command("reset"))
+async def reset_history_handler(message: Message) -> None:
+    user_id = message.from_user.id
+    async with AsyncSessionLocal() as session:
+        state = await _ensure_broadcast_state(session, user_id=user_id, username=message.from_user.username)
+        subscriptions_active = state.apartments_enabled or state.commercial_enabled
+        await upsert_sale_broadcast_state(
+            session,
+            **_state_payload(
+                user_id=user_id,
+                existing=state,
+                is_active=subscriptions_active,
+                is_paused=False,
+                last_batch_at=None,
+                total_found=0,
+                pending_ads=[],
+                sent_olx_ids=[],
+            ),
+        )
+
+    await message.answer(
+        "История отправленных объявлений очищена. Рассылка начнётся заново с самых старых объявлений по вашим активным подпискам.",
+        reply_markup=_build_keyboard(),
+    )
+    await send_broadcast_step_for_user(bot=message.bot, user_id=user_id, force=True)
 
 
 @router.message(F.text == APARTMENTS_BUTTON)
 async def start_apartments_handler(message: Message) -> None:
-    user_id = message.from_user.id
-    logger.info("start_apartments_handler: from_id=%s", user_id)
-    was_initial_scan = is_initial_scan_active()
-
-    if user_id in _broadcast_starting_users:
-        await message.answer("Сбор уже идёт. Подождите текущий запуск.")
-        return
-
-    _broadcast_stop_requested_users.discard(user_id)
-    _broadcast_starting_users.add(user_id)
-    try:
-        await message.answer("Собираю продажи квартир по Ташкенту за последний месяц.")
-
-        async with AsyncSessionLocal() as session:
-            await upsert_user(session=session, user_id=user_id, username=message.from_user.username)
-
-        snapshot = await build_apartments_sale_snapshot(limit=240)
-        window_end = datetime.now(_LOCAL_TZ)
-        window_start = window_end - timedelta(days=30)
-        filtered_ads = filter_ads_for_window(snapshot, window_start=window_start, window_end=window_end, oldest_first=True)
-
-        if await _should_abort_start(user_id):
-            await message.answer("Запуск отменён: рассылка была остановлена до завершения сбора.")
-            return
-
-        await message.answer(
-            f"Квартиры | Продажа | Ташкент\n"
-            f"За последний месяц найдено: {len(filtered_ads)}\n"
-            f"Отправка пойдёт по 1 объявлению каждые {SEND_INTERVAL_SECONDS} секунд, от самого старого к новому."
-        )
-
-        if was_initial_scan:
-            await message.answer("Первый круг завершён. База наполнена. Включаю режим уведомлений.")
-            return
-
-        await _replace_user_broadcast(
-            user_id=user_id,
-            total_found=len(filtered_ads),
-            pending_ads=_serialize_ads(filtered_ads),
-            window_start=window_start,
-            window_end=window_end,
-        )
-    finally:
-        _broadcast_starting_users.discard(user_id)
+    logger.info("apartments_button: from_id=%s", message.from_user.id)
+    await _activate_subscription(message=message, enable_apartments=True)
 
 
 @router.message(F.text == COMMERCIAL_BUTTON)
 async def start_commercial_handler(message: Message) -> None:
-    user_id = message.from_user.id
-    logger.info("start_commercial_handler: from_id=%s", user_id)
-    was_initial_scan = is_initial_scan_active()
-
-    if user_id in _broadcast_starting_users:
-        await message.answer("Сбор уже идёт. Подождите текущий запуск.")
-        return
-
-    _broadcast_stop_requested_users.discard(user_id)
-    _broadcast_starting_users.add(user_id)
-    try:
-        await message.answer("Собираю коммерческие помещения по Ташкенту за последний месяц: отдельно продажу и аренду.")
-
-        async with AsyncSessionLocal() as session:
-            await upsert_user(session=session, user_id=user_id, username=message.from_user.username)
-
-        sale_snapshot, rent_snapshot = await build_commercial_snapshot(limit_per_feed=240)
-        window_end = datetime.now(_LOCAL_TZ)
-        window_start = window_end - timedelta(days=30)
-        sale_ads = filter_ads_for_window(sale_snapshot, window_start=window_start, window_end=window_end, oldest_first=True)
-        rent_ads = filter_ads_for_window(rent_snapshot, window_start=window_start, window_end=window_end, oldest_first=True)
-        combined_ads = sorted(
-            [*sale_ads, *rent_ads],
-            key=lambda item: item.published_at or window_start,
-        )
-
-        if await _should_abort_start(user_id):
-            await message.answer("Запуск отменён: рассылка была остановлена до завершения сбора.")
-            return
-
-        await message.answer(
-            f"Коммерция | Ташкент\n"
-            f"Продажа за месяц: {len(sale_ads)}\n"
-            f"Аренда за месяц: {len(rent_ads)}\n"
-            f"Всего к отправке: {len(combined_ads)}\n"
-            f"Отправка пойдёт по 1 объявлению каждые {SEND_INTERVAL_SECONDS} секунд, от самого старого к новому."
-        )
-
-        if was_initial_scan:
-            await message.answer("Первый круг завершён. База наполнена. Включаю режим уведомлений.")
-            return
-
-        await _replace_user_broadcast(
-            user_id=user_id,
-            total_found=len(combined_ads),
-            pending_ads=_serialize_ads(combined_ads),
-            window_start=window_start,
-            window_end=window_end,
-        )
-    finally:
-        _broadcast_starting_users.discard(user_id)
+    logger.info("commercial_button: from_id=%s", message.from_user.id)
+    await _activate_subscription(message=message, enable_commercial=True)
 
 
 @router.message(F.text == STOP_BUTTON)
 async def stop_broadcast_handler(message: Message) -> None:
     user_id = message.from_user.id
-    _broadcast_starting_users.discard(user_id)
-    _broadcast_stop_requested_users.add(user_id)
-
     async with AsyncSessionLocal() as session:
-        state = await get_sale_broadcast_state(session, user_id)
-        if not state or not state.is_active:
-            await message.answer("Активной рассылки сейчас нет.")
+        state = await _ensure_broadcast_state(session, user_id=user_id, username=message.from_user.username)
+        subscriptions_active = state.apartments_enabled or state.commercial_enabled
+        if not subscriptions_active:
+            await message.answer("Активных подписок пока нет.", reply_markup=_build_keyboard())
             return
+
+        new_paused = not state.is_paused
         await upsert_sale_broadcast_state(
             session,
-            user_id=user_id,
-            is_active=False,
-            started_at=state.started_at,
-            window_start=state.window_start,
-            window_end=state.window_end,
-            last_batch_at=state.last_batch_at,
-            total_found=state.total_found,
-            pending_ads=[],
-            sent_olx_ids=list(state.sent_olx_ids or []),
+            **_state_payload(
+                user_id=user_id,
+                existing=state,
+                is_active=True,
+                is_paused=new_paused,
+                last_batch_at=None if not new_paused else state.last_batch_at,
+                pending_ads=[],
+            ),
         )
-    await message.answer("Рассылка остановлена.")
 
+    if new_paused:
+        await message.answer("Рассылка поставлена на паузу.", reply_markup=_build_keyboard())
+        return
 
-@router.message(F.text.in_({NOTIFICATIONS_OFF_BUTTON, NOTIFICATIONS_ON_BUTTON}))
-async def toggle_notifications_handler(message: Message) -> None:
-    user_id = message.from_user.id
-    async with AsyncSessionLocal() as session:
-        await upsert_user(session=session, user_id=user_id, username=message.from_user.username)
-        notifications_enabled = await toggle_user_notifications_enabled(session, user_id)
-
-    keyboard = _build_keyboard(notifications_enabled=notifications_enabled)
-    if notifications_enabled:
-        await message.answer(
-            "Уведомления включены. Вы будете получать новые объекты по мере их обработки.",
-            reply_markup=keyboard,
-        )
-    else:
-        await message.answer(
-            "Уведомления отключены. Сбор базы продолжается в фоновом режиме.",
-            reply_markup=keyboard,
-        )
+    await message.answer("Рассылка продолжена.", reply_markup=_build_keyboard())
+    await send_broadcast_step_for_user(bot=message.bot, user_id=user_id, force=True)
 
 
 async def main() -> None:
+    global _scraping_task
     _setup_logging()
 
     if not settings.BOT_TOKEN:
@@ -311,6 +397,12 @@ async def main() -> None:
     try:
         await dp.start_polling(bot)
     finally:
+        if _scraping_task is not None:
+            _scraping_task.cancel()
+            try:
+                await _scraping_task
+            except asyncio.CancelledError:
+                pass
         worker_task.cancel()
         try:
             await worker_task

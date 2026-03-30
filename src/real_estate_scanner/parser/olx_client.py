@@ -18,6 +18,10 @@ from real_estate_scanner.config import settings
 
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
+
+
+class OlxTemporaryBlockError(RuntimeError):
+    pass
 _RU_MONTHS = {
     "января": 1,
     "февраля": 2,
@@ -1202,9 +1206,56 @@ async def detect_last_page_for_search(
             context = None
             page: Page | None = None
             try:
+                async def _count_listing_candidates(current_page: Page) -> int:
+                    try:
+                        return await current_page.evaluate(
+                            """
+                            () => {
+                              const hrefs = Array.from(document.querySelectorAll('a[href*="/d/obyavlenie/"]'))
+                                .map(el => el.getAttribute('href') || '')
+                                .filter(Boolean);
+                              return new Set(hrefs).size;
+                            }
+                            """
+                        )
+                    except Exception:
+                        return 0
+
+                async def _page_has_results(page_number: int) -> bool:
+                    probe_url = _build_search_page_url(
+                        base_url=url,
+                        page_number=page_number,
+                        price_from=price_from,
+                        price_to=price_to,
+                    )
+                    await page.goto(probe_url, wait_until="domcontentloaded", timeout=10000)
+                    try:
+                        await page.wait_for_selector(
+                            '[data-testid="pagination-list"], a[href*="/d/obyavlenie/"], div[data-testid="listing-grid"]',
+                            timeout=5000,
+                        )
+                    except Exception:
+                        logger.debug("OLX: probe page %s did not stabilize quickly during last-page detection", page_number)
+                    page_title = await page.title()
+                    if page_title and "ERROR: The request could not be satisfied" in page_title:
+                        raise OlxTemporaryBlockError(
+                            f"OLX anti-bot page during last-page probe for price {price_from}-{price_to} page={page_number}"
+                        )
+                    body_text = await page.evaluate("() => (document.body?.innerText || '').toLowerCase()")
+                    if (
+                        "the request could not be satisfied" in body_text
+                        or "access denied" in body_text
+                        or "just a moment" in body_text
+                    ):
+                        raise OlxTemporaryBlockError(
+                            f"OLX anti-bot body during last-page probe for price {price_from}-{price_to} page={page_number}"
+                        )
+                    return (await _count_listing_candidates(page)) > 0
+
                 browser = await p.chromium.launch(headless=headless)
                 context = await browser.new_context()
                 page = await context.new_page()
+                page.set_default_timeout(8000)
 
                 logger.info(
                     "OLX detect last page: %s (price_from=%s, price_to=%s)",
@@ -1212,12 +1263,7 @@ async def detect_last_page_for_search(
                     price_from,
                     price_to,
                 )
-                await page.goto(target_url, wait_until="domcontentloaded")
-                try:
-                    await page.wait_for_load_state("networkidle")
-                except Exception:
-                    logger.debug("OLX: wait_for_load_state(networkidle) failed during last-page detection")
-
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=10000)
                 try:
                     await page.wait_for_selector(
                         '[data-testid="pagination-list"], a[href*="/d/obyavlenie/"], div[data-testid="listing-grid"]',
@@ -1225,6 +1271,15 @@ async def detect_last_page_for_search(
                     )
                 except Exception:
                     logger.debug("OLX: pagination/listing did not appear quickly during last-page detection")
+
+                try:
+                    page_title = await page.title()
+                except Exception:
+                    page_title = ""
+                if page_title and "ERROR: The request could not be satisfied" in page_title:
+                    raise OlxTemporaryBlockError(
+                        f"OLX anti-bot page during last-page detection for price {price_from}-{price_to}"
+                    )
 
                 no_result = await page.evaluate(
                     """
@@ -1238,21 +1293,80 @@ async def detect_last_page_for_search(
                     """
                 )
                 if no_result:
-                    return None
+                    return 0
 
                 last_page = await page.eval_on_selector_all(
                     '[data-testid="pagination-list"] a, [data-testid="pagination-list"] button',
                     """
                     (els) => {
-                      const values = els
-                        .map(el => (el.innerText || el.textContent || '').trim())
-                        .map(text => Number(text))
-                        .filter(value => Number.isFinite(value) && value > 0);
+                      const values = els.flatMap(el => {
+                        const raw = [
+                          el.innerText || el.textContent || '',
+                          el.getAttribute('aria-label') || '',
+                          el.getAttribute('href') || '',
+                        ].join(' ');
+                        const matches = raw.match(/page(?:=|\\s)(\\d+)|\\b(\\d{1,3})\\b/gi) || [];
+                        return matches
+                          .map(part => {
+                            const numberMatch = part.match(/(\\d{1,3})/);
+                            return numberMatch ? Number(numberMatch[1]) : NaN;
+                          })
+                          .filter(value => Number.isFinite(value) && value > 0);
+                      });
                       return values.length ? Math.max(...values) : 1;
                     }
                     """,
                 )
-                return min(int(last_page or 1), max_page)
+                last_page = min(int(last_page or 1), max_page)
+
+                if last_page == max_page:
+                    if not await _page_has_results(last_page):
+                        logger.warning(
+                            "OLX last-page detection hit max_page=%s but probe page is empty (price_from=%s, price_to=%s). Scanning downward for the real last page...",
+                            max_page,
+                            price_from,
+                            price_to,
+                        )
+                        for probe_page in range(last_page - 1, 1, -1):
+                            if await _page_has_results(probe_page):
+                                logger.info(
+                                    "OLX last-page detection corrected via backward probe: using page=%s (price_from=%s, price_to=%s)",
+                                    probe_page,
+                                    price_from,
+                                    price_to,
+                                )
+                                return probe_page
+                        return 1
+
+                if last_page <= 1:
+                    listing_candidates = await _count_listing_candidates(page)
+                    if listing_candidates >= 35:
+                        logger.warning(
+                            "OLX last-page detection suspicious: pagination=1 but candidates=%s (price_from=%s, price_to=%s). Probing deeper pages...",
+                            listing_candidates,
+                            price_from,
+                            price_to,
+                        )
+                        for probe_page in range(max_page, 1, -1):
+                            try:
+                                if await _page_has_results(probe_page):
+                                    logger.info(
+                                        "OLX last-page detection recovered via probe: using page=%s (price_from=%s, price_to=%s)",
+                                        probe_page,
+                                        price_from,
+                                        price_to,
+                                    )
+                                    return probe_page
+                            except Exception:
+                                logger.debug(
+                                    "OLX probe failed during last-page detection: page=%s price_from=%s price_to=%s",
+                                    probe_page,
+                                    price_from,
+                                    price_to,
+                                )
+                        return 1
+
+                return last_page
             finally:
                 if page is not None:
                     try:
@@ -1318,6 +1432,7 @@ async def fetch_ads_from_search(
                 browser = await p.chromium.launch(headless=headless)
                 context = await browser.new_context()
                 page = await context.new_page()
+                page.set_default_timeout(8000)
 
                 logger.info(
                     "OLX navigate: %s (page=%s, price_from=%s, price_to=%s)",
@@ -1326,28 +1441,41 @@ async def fetch_ads_from_search(
                     price_from,
                     price_to,
                 )
-                await page.goto(target_url, wait_until="domcontentloaded")
-                # Strong waits: OLX is heavily JS-driven; we need deterministic rendering.
-                try:
-                    await page.wait_for_load_state("networkidle")
-                except Exception:
-                    logger.debug("OLX: wait_for_load_state(networkidle) failed; continuing anyway")
-
+                await page.goto(target_url, wait_until="domcontentloaded", timeout=10000)
                 try:
                     await page.wait_for_selector(
                         "a[href*=\"/d/obyavlenie/\"], div[data-testid=\"listing-grid\"]",
                         timeout=5000,
                     )
                 except Exception:
-                    await page.wait_for_timeout(1200)
+                    logger.debug("OLX: listing grid did not appear quickly; continuing with DOM snapshot")
 
                 try:
                     page_title = await page.title()
-                    logger.info("Page title: %s", page_title)
-                    if page_title and ("Access Denied" in page_title or "Just a moment" in page_title):
-                        logger.warning("OLX: possible block/captcha detected (title=%s)", page_title)
                 except Exception:
+                    page_title = ""
                     logger.debug("OLX: page.title() failed")
+                if page_title:
+                    logger.info("Page title: %s", page_title)
+                if page_title and (
+                    "Access Denied" in page_title
+                    or "Just a moment" in page_title
+                    or "ERROR: The request could not be satisfied" in page_title
+                ):
+                    raise OlxTemporaryBlockError(f"OLX anti-bot page detected (title={page_title})")
+
+                anti_bot_body = await page.evaluate(
+                    """
+                    () => {
+                      const text = (document.body?.innerText || '').toLowerCase();
+                      return text.includes('the request could not be satisfied') ||
+                             text.includes('access denied') ||
+                             text.includes('just a moment');
+                    }
+                    """
+                )
+                if anti_bot_body:
+                    raise OlxTemporaryBlockError("OLX anti-bot page detected from body text")
 
                 candidates = await _collect_candidate_ads(page)
                 logger.info(
@@ -1434,6 +1562,8 @@ async def fetch_ads_from_search(
                     except Exception:
                         logger.debug("OLX: browser.close() failed for search url=%s", url)
 
+    except OlxTemporaryBlockError:
+        raise
     except Exception:
         logger.exception(
             "fetch_ads_from_search failed (url=%s, page=%s, price_from=%s, price_to=%s)",

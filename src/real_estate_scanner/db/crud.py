@@ -1,10 +1,11 @@
 from __future__ import annotations
 
+from datetime import datetime, timedelta, timezone
 import logging
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import delete, func, select, text
+from sqlalchemy import delete, func, or_, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.exc import IntegrityError
@@ -12,6 +13,20 @@ from sqlalchemy.exc import IntegrityError
 from real_estate_scanner.db.models import Ad, Filter, SaleBroadcastState, User
 
 logger = logging.getLogger(__name__)
+AD_RETENTION_DAYS = 30
+
+
+def get_ad_retention_cutoff(*, now: datetime | None = None) -> datetime:
+    reference = now or datetime.now(timezone.utc)
+    return reference - timedelta(days=AD_RETENTION_DAYS)
+
+
+def _normalize_timestamp(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 async def upsert_user(session: AsyncSession, user_id: int, username: str | None) -> None:
@@ -213,6 +228,9 @@ async def upsert_sale_broadcast_state(
     *,
     user_id: int,
     is_active: bool,
+    apartments_enabled: bool = False,
+    commercial_enabled: bool = False,
+    is_paused: bool = False,
     started_at,
     window_start,
     window_end,
@@ -226,6 +244,9 @@ async def upsert_sale_broadcast_state(
         .values(
             user_id=user_id,
             is_active=is_active,
+            apartments_enabled=apartments_enabled,
+            commercial_enabled=commercial_enabled,
+            is_paused=is_paused,
             started_at=started_at,
             window_start=window_start,
             window_end=window_end,
@@ -238,6 +259,9 @@ async def upsert_sale_broadcast_state(
             index_elements=[SaleBroadcastState.user_id],
             set_={
                 "is_active": is_active,
+                "apartments_enabled": apartments_enabled,
+                "commercial_enabled": commercial_enabled,
+                "is_paused": is_paused,
                 "started_at": started_at,
                 "window_start": window_start,
                 "window_end": window_end,
@@ -264,6 +288,15 @@ async def ad_exists(session: AsyncSession, olx_id: str) -> bool:
     return res.scalar_one_or_none() is not None
 
 
+async def get_existing_ad_ids(session: AsyncSession, olx_ids: list[str]) -> set[str]:
+    unique_ids = [olx_id for olx_id in dict.fromkeys(olx_ids) if olx_id]
+    if not unique_ids:
+        return set()
+    stmt = select(Ad.olx_id).where(Ad.olx_id.in_(unique_ids))
+    res = await session.execute(stmt)
+    return {value for value in res.scalars().all() if value}
+
+
 async def ad_scanned_within_hours(session: AsyncSession, olx_id: str, *, hours: int) -> bool:
     threshold = func.now() - text(f"INTERVAL '{int(hours)} hours'")
     stmt = (
@@ -274,6 +307,40 @@ async def ad_scanned_within_hours(session: AsyncSession, olx_id: str, *, hours: 
     )
     res = await session.execute(stmt)
     return res.scalar_one_or_none() is not None
+
+
+async def get_ads_scanned_within_hours(session: AsyncSession, olx_ids: list[str], *, hours: int) -> set[str]:
+    unique_ids = [olx_id for olx_id in dict.fromkeys(olx_ids) if olx_id]
+    if not unique_ids:
+        return set()
+    threshold = func.now() - text(f"INTERVAL '{int(hours)} hours'")
+    stmt = (
+        select(Ad.olx_id)
+        .where(Ad.olx_id.in_(unique_ids))
+        .where(Ad.scanned_at >= threshold)
+    )
+    res = await session.execute(stmt)
+    return {value for value in res.scalars().all() if value}
+
+
+async def get_ad_raw_details(session: AsyncSession, olx_id: str) -> dict[str, Any] | None:
+    stmt = select(Ad.raw_details).where(Ad.olx_id == olx_id).limit(1)
+    res = await session.execute(stmt)
+    value = res.scalar_one_or_none()
+    return dict(value or {}) if value is not None else None
+
+
+async def delete_expired_ads(session: AsyncSession, *, cutoff: datetime | None = None) -> int:
+    retention_cutoff = _normalize_timestamp(cutoff) or get_ad_retention_cutoff()
+    stmt = delete(Ad).where(
+        or_(
+            Ad.published_at < retention_cutoff,
+            Ad.published_at.is_(None) & (Ad.scanned_at < retention_cutoff),
+        )
+    )
+    result = await session.execute(stmt)
+    await session.commit()
+    return int(result.rowcount or 0)
 
 
 async def upsert_scanned_ad(
@@ -288,7 +355,13 @@ async def upsert_scanned_ad(
     category: str,
     raw_details: dict[str, Any],
     image_url: str | None = None,
-) -> None:
+    is_enriched: bool = False,
+) -> bool:
+    normalized_published_at = _normalize_timestamp(published_at)
+    retention_cutoff = get_ad_retention_cutoff()
+    if normalized_published_at is not None and normalized_published_at < retention_cutoff:
+        return False
+
     stmt = (
         pg_insert(Ad)
         .values(
@@ -296,11 +369,12 @@ async def upsert_scanned_ad(
             title=title,
             price=price,
             currency=currency,
-            published_at=published_at,
+            published_at=normalized_published_at,
             url=url,
             category=category,
             raw_details=raw_details,
             scanned_at=func.now(),
+            is_enriched=is_enriched,
             link=url,
             image_url=image_url,
         )
@@ -310,11 +384,12 @@ async def upsert_scanned_ad(
                 "title": title,
                 "price": price,
                 "currency": currency,
-                "published_at": published_at,
+                "published_at": normalized_published_at,
                 "url": url,
                 "category": category,
                 "raw_details": raw_details,
                 "scanned_at": func.now(),
+                "is_enriched": is_enriched,
                 "link": url,
                 "image_url": image_url,
             },
@@ -322,6 +397,7 @@ async def upsert_scanned_ad(
     )
     await session.execute(stmt)
     await session.commit()
+    return True
 
 
 async def get_recent_ads_raw(
@@ -331,10 +407,12 @@ async def get_recent_ads_raw(
     window_start,
     window_end,
 ) -> list[dict[str, Any]]:
+    retention_cutoff = get_ad_retention_cutoff()
     stmt = (
         select(Ad)
         .where(Ad.category == category)
         .where(Ad.published_at.is_not(None))
+        .where(Ad.published_at >= retention_cutoff)
         .where(Ad.published_at >= window_start)
         .where(Ad.published_at <= window_end)
         .order_by(Ad.published_at.asc())
@@ -351,7 +429,49 @@ async def get_recent_ads_raw(
         payload.setdefault("image_url", row.image_url)
         payload.setdefault("ad_type", row.category)
         payload.setdefault("published_at", row.published_at.isoformat() if row.published_at else None)
-        payload.setdefault("details_loaded", True)
+        payload.setdefault("details_loaded", bool(row.is_enriched))
+        payloads.append(payload)
+    return payloads
+
+
+async def get_oldest_ads_raw_for_categories(
+    session: AsyncSession,
+    *,
+    categories: list[str],
+    exclude_olx_ids: list[str] | set[str] | None = None,
+    limit: int = 50,
+) -> list[dict[str, Any]]:
+    unique_categories = [category for category in dict.fromkeys(categories) if category]
+    if not unique_categories:
+        return []
+
+    retention_cutoff = get_ad_retention_cutoff()
+    stmt = (
+        select(Ad)
+        .where(Ad.category.in_(unique_categories))
+        .where(Ad.published_at.is_not(None))
+        .where(Ad.published_at >= retention_cutoff)
+        .order_by(Ad.published_at.asc(), Ad.scanned_at.asc(), Ad.id.asc())
+        .limit(max(1, int(limit)))
+    )
+
+    excluded = [olx_id for olx_id in dict.fromkeys(exclude_olx_ids or []) if olx_id]
+    if excluded:
+        stmt = stmt.where(Ad.olx_id.not_in(excluded))
+
+    res = await session.execute(stmt)
+    rows = list(res.scalars().all())
+    payloads: list[dict[str, Any]] = []
+    for row in rows:
+        payload = dict(row.raw_details or {})
+        payload.setdefault("olx_id", row.olx_id)
+        payload.setdefault("title", row.title)
+        payload.setdefault("price", row.price)
+        payload.setdefault("link", row.url or row.link)
+        payload.setdefault("image_url", row.image_url)
+        payload.setdefault("ad_type", row.category)
+        payload.setdefault("published_at", row.published_at.isoformat() if row.published_at else None)
+        payload.setdefault("details_loaded", bool(row.is_enriched))
         payloads.append(payload)
     return payloads
 

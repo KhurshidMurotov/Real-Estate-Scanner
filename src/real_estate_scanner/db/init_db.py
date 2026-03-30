@@ -35,6 +35,9 @@ async def init_db() -> None:
             text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS scanned_at TIMESTAMPTZ NOT NULL DEFAULT NOW()")
         )
         await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS is_enriched BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        await conn.execute(
             text("UPDATE ads SET url = COALESCE(url, link) WHERE url IS NULL")
         )
         await conn.execute(
@@ -128,6 +131,9 @@ async def init_db() -> None:
                 CREATE TABLE IF NOT EXISTS sale_broadcast_states (
                     user_id BIGINT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
                     is_active BOOLEAN NOT NULL DEFAULT FALSE,
+                    apartments_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    commercial_enabled BOOLEAN NOT NULL DEFAULT FALSE,
+                    is_paused BOOLEAN NOT NULL DEFAULT FALSE,
                     started_at TIMESTAMPTZ NULL,
                     window_start TIMESTAMPTZ NULL,
                     window_end TIMESTAMPTZ NULL,
@@ -138,5 +144,14 @@ async def init_db() -> None:
                 )
                 """
             )
+        )
+        await conn.execute(
+            text("ALTER TABLE sale_broadcast_states ADD COLUMN IF NOT EXISTS apartments_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        await conn.execute(
+            text("ALTER TABLE sale_broadcast_states ADD COLUMN IF NOT EXISTS commercial_enabled BOOLEAN NOT NULL DEFAULT FALSE")
+        )
+        await conn.execute(
+            text("ALTER TABLE sale_broadcast_states ADD COLUMN IF NOT EXISTS is_paused BOOLEAN NOT NULL DEFAULT FALSE")
         )
 

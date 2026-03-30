@@ -1,1 +1,6 @@
 .env
+\logs
+\logs
+\logs\*
+/logs
+*.log
