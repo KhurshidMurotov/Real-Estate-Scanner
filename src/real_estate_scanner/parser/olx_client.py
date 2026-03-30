@@ -797,6 +797,61 @@ async def fetch_ads_from_search(
     return ads
 
 
+async def fetch_ads_from_search_fast(
+    *,
+    url: str,
+    ad_type: str,
+    city: str,
+    limit: int = 10,
+) -> list[ParsedAd]:
+    """Быстрая версия для оценки — меньше ожиданий."""
+    base_url = settings.OLX_BASE_URL
+    ads: list[ParsedAd] = []
+    headless_env = os.getenv("OLX_HEADLESS", "true").strip().lower()
+    headless = headless_env in {"1", "true", "yes", "y", "on"}
+
+    try:
+        async with Stealth().use_async(async_playwright()) as p:
+            browser: Browser = await p.chromium.launch(headless=headless)
+            page: Page = await browser.new_page()
+
+            logger.info("OLX fast navigate: %s", url)
+            await page.goto(url, wait_until="domcontentloaded")
+            # Уменьшенное ожидание для скорости
+            await asyncio.sleep(2)  # было 5 секунд
+
+            candidates = await _collect_candidate_ads(page)
+            logger.info("OLX fast: candidates=%s for url=%s", len(candidates), url)
+
+            count = 0
+            for href, title, price_text, text, rooms_text, area_text, image_url in candidates:
+                if count >= limit:
+                    break
+
+                parsed = _extract_ads_from_dom_text(
+                    ad_text=text,
+                    href=href,
+                    title_fallback=title or text,
+                    ad_type=ad_type,
+                    city=city,
+                    base_url=base_url,
+                    price_text=price_text or None,
+                    image_url=image_url,
+                    rooms_text=rooms_text,
+                    area_text=area_text,
+                )
+                if parsed is not None:
+                    ads.append(parsed)
+                    count += 1
+
+            await browser.close()
+
+    except Exception:
+        logger.exception("fetch_ads_from_search_fast failed (url=%s)", url)
+
+    return ads
+
+
 async def fetch_ad_details(url: str) -> dict[str, str | int | None]:
     headless_env = os.getenv("OLX_HEADLESS", "true").strip().lower()
     headless = headless_env in {"1", "true", "yes", "y", "on"}

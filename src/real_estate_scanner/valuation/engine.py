@@ -9,7 +9,7 @@ from real_estate_scanner.config import settings
 from real_estate_scanner.parser.olx_client import (
     ParsedAd,
     build_search_url,
-    fetch_ads_from_search,
+    fetch_ads_from_search_fast,
 )
 
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ UZS_TO_USD_RATE = 0.00008  # 1 сум = ~0.00008 USD (примерно 1 USD = 1
 
 async def fetch_comparable_ads(
     params: ValuationParams,
-    limit: int = 20,
+    limit: int = 10,
 ) -> list[ParsedAd]:
     """
     Собирает сравнимые объявления с OLX по заданным параметрам.
@@ -87,11 +87,11 @@ async def fetch_comparable_ads(
         params.area,
     )
     
-    all_ads = await fetch_ads_from_search(
+    all_ads = await fetch_ads_from_search_fast(
         url=url,
         ad_type=params.ad_type,
         city=params.district,
-        limit=limit * 2,  # берём больше для фильтрации
+        limit=limit,  # берём ровно столько, сколько нужно
     )
     
     comparable = []
