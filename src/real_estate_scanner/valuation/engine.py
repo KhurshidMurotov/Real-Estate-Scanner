@@ -1,6 +1,7 @@
 """Модуль оценки стоимости недвижимости (Market Comparison Approach)."""
 from __future__ import annotations
 
+import asyncio
 import logging
 from dataclasses import dataclass
 from typing import Optional
@@ -65,23 +66,27 @@ UZS_TO_USD_RATE = 0.00008  # 1 сум = ~0.00008 USD (примерно 1 USD = 1
 
 async def fetch_comparable_ads(
     params: ValuationParams,
-    limit: int = 10,
+    limit: int = 40,
 ) -> list[ParsedAd]:
     """
     Собирает сравнимые объявления с OLX по заданным параметрам.
     
-    Фильтры:
+    Фильтры применяются на стороне OLX через URL:
     - Тот же район
-    - Те же комнаты (или ±1)
+    - Те же комнаты
     - Площадь ±20% от заданной
     """
+    # Формируем URL с фильтрами на стороне OLX
     url = build_search_url(
         ad_type=params.ad_type,
         city_slug=params.district,
+        rooms=params.rooms,
+        area_from=params.area * 0.8,  # -20%
+        area_to=params.area * 1.2,    # +20%
     )
     
     logger.info(
-        "Оценка: ищу сравнимые объявления district=%s rooms=%s area=%s",
+        "Оценка: ищу сравнимые объявления district=%s rooms=%s area=%s (URL фильтры)",
         params.district,
         params.rooms,
         params.area,
@@ -91,28 +96,19 @@ async def fetch_comparable_ads(
         url=url,
         ad_type=params.ad_type,
         city=params.district,
-        limit=limit,  # берём ровно столько, сколько нужно
+        limit=limit,
     )
     
+    # Теперь фильтруем только по комнатам ±1 (OLX точное совпадение, нам нужно ±1)
     comparable = []
-    area_min = params.area * 0.8  # -20%
-    area_max = params.area * 1.2  # +20%
-    
     for ad in all_ads:
-        # Проверяем комнаты (точное совпадение или ±1)
         if ad.rooms is not None and abs(ad.rooms - params.rooms) > 1:
             continue
-            
-        # Проверяем площадь
-        if ad.area is not None and not (area_min <= ad.area <= area_max):
-            continue
-            
         comparable.append(ad)
-        
-        if len(comparable) >= limit:
+        if len(comparable) >= 10:  # достаточно для оценки
             break
     
-    logger.info("Оценка: найдено %s сравнимых объявлений", len(comparable))
+    logger.info("Оценка: найдено %s сравнимых объявлений (из %s загруженных)", len(comparable), len(all_ads))
     return comparable
 
 
@@ -260,9 +256,32 @@ async def estimate_property_value(
     Returns:
         Результат оценки с диапазоном цен
     """
-    comparable_ads = await fetch_comparable_ads(params)
-    result = calculate_valuation(comparable_ads, params)
-    return result
+    try:
+        # Таймаут 15 секунд на сбор данных
+        comparable_ads = await asyncio.wait_for(
+            fetch_comparable_ads(params),
+            timeout=15.0,
+        )
+        result = calculate_valuation(comparable_ads, params)
+        return result
+    except asyncio.TimeoutError:
+        logger.error("Оценка: таймаут при сборе данных с OLX (15 сек)")
+        return ValuationResult(
+            min_price=0,
+            max_price=0,
+            avg_price_per_sqm=0.0,
+            comparable_ads=[],
+            confidence="low",
+        )
+    except Exception as e:
+        logger.exception("Оценка: ошибка при сборе данных: %s", e)
+        return ValuationResult(
+            min_price=0,
+            max_price=0,
+            avg_price_per_sqm=0.0,
+            comparable_ads=[],
+            confidence="low",
+        )
 
 
 def format_valuation_message(result: ValuationResult, params: ValuationParams) -> str:

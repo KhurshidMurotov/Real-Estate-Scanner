@@ -816,7 +816,7 @@ async def fetch_ads_from_search_fast(
             page: Page = await browser.new_page()
 
             logger.info("OLX fast navigate: %s", url)
-            await page.goto(url, wait_until="domcontentloaded")
+            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
             # Уменьшенное ожидание для скорости
             await asyncio.sleep(2)  # было 5 секунд
 
@@ -979,12 +979,35 @@ async def enrich_ad_with_details(ad: ParsedAd) -> ParsedAd:
     )
 
 
-def build_search_url(*, ad_type: str, city_slug: str) -> str:
+def build_search_url(
+    *,
+    ad_type: str,
+    city_slug: str,
+    rooms: int | None = None,
+    area_from: float | None = None,
+    area_to: float | None = None,
+) -> str:
+    """Формирует URL поиска с опциональными фильтрами."""
     if ad_type == "sale":
         path = f"/nedvizhimost/kvartiry/prodazha/{city_slug}/"
     else:
         path = f"/nedvizhimost/kvartiry/arenda-dolgosrochnaya/{city_slug}/"
-    return urljoin(settings.OLX_BASE_URL, path)
+    
+    url = urljoin(settings.OLX_BASE_URL, path)
+    
+    # Добавляем query параметры если есть фильтры
+    params = []
+    if rooms is not None:
+        params.append(f"search[filter_enum_number_of_rooms][0]={rooms}")
+    if area_from is not None:
+        params.append(f"search[filter_float_total_area:from]={int(area_from)}")
+    if area_to is not None:
+        params.append(f"search[filter_float_total_area:to]={int(area_to)}")
+    
+    if params:
+        url = f"{url}?{'&'.join(params)}"
+    
+    return url
 
 
 # Compatibility alias (requested by QA tests)
