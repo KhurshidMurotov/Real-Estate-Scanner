@@ -171,7 +171,7 @@ async def handle_valuation_data(message: Message, valuation_data: dict) -> None:
         return
     
     # Отправляем сообщение о начале оценки
-    await message.answer("🔍 Собираю данные с OLX для оценки... Это займет 5-10 секунд.")
+    await message.answer("🔍 Ищу похожие объявления в базе данных...")
     
     try:
         # Создаем параметры для оценки

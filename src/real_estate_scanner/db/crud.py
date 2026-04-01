@@ -88,36 +88,113 @@ async def is_new_ad(session: AsyncSession, olx_id: str) -> bool:
 
 async def add_ad(session: AsyncSession, ad_data: dict[str, Any]) -> None:
     """
-    Сохраняет объявление в `ads`.
+    Сохраняет объявление в `ads` с полными данными для оценки.
 
-    Используем `ON CONFLICT DO NOTHING` по `olx_id`, чтобы избежать ошибок дублей.
+    Используем `ON CONFLICT DO UPDATE` по `olx_id`, чтобы обновлять данные если объявление уже есть.
     """
     try:
         values: dict[str, Any] = {
             "olx_id": ad_data["olx_id"],
+            "ad_type": ad_data.get("ad_type", "sale"),
             "price": ad_data["price"],
             "link": ad_data["link"],
             "title": ad_data["title"],
         }
-        if "image_url" in ad_data:
-            values["image_url"] = ad_data["image_url"]
+
+        # Опциональные поля
+        optional_fields = [
+            "area", "rooms", "floor", "total_floors",
+            "district", "city", "image_url", "description", "raw_data"
+        ]
+        for field in optional_fields:
+            if field in ad_data:
+                values[field] = ad_data[field]
+
         if "timestamp" in ad_data and ad_data["timestamp"] is not None:
             values["timestamp"] = ad_data["timestamp"]
 
         stmt = (
             pg_insert(Ad)
             .values(**values)
-            .on_conflict_do_nothing(index_elements=[Ad.olx_id])
+            .on_conflict_do_update(
+                index_elements=[Ad.olx_id],
+                set_={
+                    "price": values["price"],
+                    "title": values["title"],
+                    "area": values.get("area"),
+                    "rooms": values.get("rooms"),
+                    "floor": values.get("floor"),
+                    "total_floors": values.get("total_floors"),
+                    "district": values.get("district"),
+                    "city": values.get("city"),
+                    "image_url": values.get("image_url"),
+                    "description": values.get("description"),
+                    "raw_data": values.get("raw_data", {}),
+                    "timestamp": values.get("timestamp"),
+                },
+            )
         )
         await session.execute(stmt)
         await session.commit()
-    except IntegrityError:
-        # На случай если уникальный ключ изменится/не применилась конфигурация.
-        logger.exception("add_ad integrity error (olx_id=%s)", ad_data.get("olx_id"))
-        await session.rollback()
-        raise
     except Exception:
         logger.exception("add_ad failed (olx_id=%s)", ad_data.get("olx_id"))
+        await session.rollback()
+        raise
+
+
+async def get_comparable_ads(
+    session: AsyncSession,
+    ad_type: str,
+    district: str,
+    rooms: int,
+    area: float,
+    limit: int = 20,
+) -> list[Ad]:
+    """
+    Быстрый поиск сравнимых объявлений из локальной БД для оценки.
+
+    Фильтры:
+    - Тот же тип (sale/rent)
+    - Тот же район
+    - Комнаты: точное совпадение или ±1
+    - Площадь ±20% от заданной
+    - Данные не старше 7 дней
+    """
+    from datetime import datetime, timedelta
+    from decimal import Decimal
+
+    try:
+        area_min = Decimal(str(area * 0.8))
+        area_max = Decimal(str(area * 1.2))
+        rooms_min = rooms - 1
+        rooms_max = rooms + 1
+        cutoff_time = datetime.utcnow() - timedelta(days=7)
+
+        stmt = (
+            select(Ad)
+            .where(
+                Ad.ad_type == ad_type,
+                Ad.district == district,
+                Ad.rooms >= rooms_min,
+                Ad.rooms <= rooms_max,
+                Ad.area >= area_min,
+                Ad.area <= area_max,
+                Ad.timestamp >= cutoff_time,
+            )
+            .order_by(Ad.timestamp.desc())
+            .limit(limit)
+        )
+
+        res = await session.execute(stmt)
+        return list(res.scalars().all())
+    except Exception:
+        logger.exception(
+            "get_comparable_ads failed (type=%s district=%s rooms=%s area=%s)",
+            ad_type,
+            district,
+            rooms,
+            area,
+        )
         await session.rollback()
         raise
 

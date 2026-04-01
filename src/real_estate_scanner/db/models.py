@@ -78,15 +78,41 @@ class Ad(Base):
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     olx_id: Mapped[str] = mapped_column(String(64), unique=True, nullable=False, index=True)
 
-    price: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    # Тип объявления
+    ad_type: Mapped[str] = mapped_column(String(16), nullable=False, index=True)  # "sale" или "rent"
+
+    # Цена и площадь (ключевые для оценки)
+    price: Mapped[int] = mapped_column(BigInteger, nullable=False, index=True)
+    area: Mapped[Decimal | None] = mapped_column(Numeric(12, 2), nullable=True, index=True)
+
+    # Параметры квартиры
+    rooms: Mapped[int | None] = mapped_column(BigInteger, nullable=True, index=True)
+    floor: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+    total_floors: Mapped[int | None] = mapped_column(BigInteger, nullable=True)
+
+    # Локация
+    district: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+    city: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+
+    # Метаданные
     link: Mapped[str] = mapped_column(Text, nullable=False)
     title: Mapped[str] = mapped_column(Text, nullable=False)
     image_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
 
+    # Время сбора данных
     timestamp: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
         server_default=func.now(),
+        index=True,
+    )
+
+    # Дополнительные данные (JSON)
+    raw_data: Mapped[dict] = mapped_column(
+        JSONB,
+        nullable=False,
+        server_default=text("'{}'::jsonb"),
     )
 
 

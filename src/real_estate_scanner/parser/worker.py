@@ -479,6 +479,26 @@ async def run_worker(bot: Bot, *, interval_seconds: int = 200) -> None:
 
                     for ad in new_ads:
                         detailed_ad = await enrich_ad_with_details(ad)
+                        # Сохраняем в БД для оценки
+                        await add_ad(
+                            session=session,
+                            ad_data={
+                                "olx_id": detailed_ad.olx_id,
+                                "ad_type": detailed_ad.ad_type,
+                                "price": detailed_ad.price,
+                                "link": detailed_ad.link,
+                                "title": detailed_ad.title,
+                                "image_url": detailed_ad.image_url,
+                                "area": detailed_ad.area,
+                                "rooms": detailed_ad.rooms,
+                                "floor": detailed_ad.floor,
+                                "total_floors": detailed_ad.total_floors,
+                                "district": detailed_ad.district,
+                                "city": detailed_ad.city,
+                                "description": detailed_ad.description,
+                                "raw_data": asdict(detailed_ad),
+                            },
+                        )
                         await _notify_users_for_ad(bot=bot, session=session, ad=detailed_ad)
                         await asyncio.sleep(1.5)
 

@@ -16,6 +16,53 @@ async def init_db() -> None:
         await conn.execute(
             text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS image_url TEXT")
         )
+        # New columns for valuation support
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS ad_type VARCHAR(16) NOT NULL DEFAULT 'sale'")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS area NUMERIC(12,2)")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS rooms BIGINT")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS floor BIGINT")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS total_floors BIGINT")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS district VARCHAR(128)")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS city VARCHAR(128)")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS description TEXT")
+        )
+        await conn.execute(
+            text("ALTER TABLE ads ADD COLUMN IF NOT EXISTS raw_data JSONB NOT NULL DEFAULT '{}'::jsonb")
+        )
+        # Add indexes for valuation queries
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_ads_ad_type ON ads(ad_type)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_ads_district ON ads(district)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_ads_rooms ON ads(rooms)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_ads_area ON ads(area)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_ads_timestamp ON ads(timestamp)")
+        )
+        await conn.execute(
+            text("CREATE INDEX IF NOT EXISTS idx_ads_valuation ON ads(ad_type, district, rooms, area, timestamp)")
+        )
         await conn.execute(
             text("ALTER TABLE filters ADD COLUMN IF NOT EXISTS cities JSONB NOT NULL DEFAULT '[]'::jsonb")
         )
