@@ -12,12 +12,23 @@ from urllib.parse import urljoin
 from zoneinfo import ZoneInfo
 
 from playwright.async_api import Browser, Page, async_playwright
-from playwright_stealth import Stealth
 
 from real_estate_scanner.config import settings
 
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
+
+# Флаги для Chromium (важно для Windows)
+_BROWSER_ARGS = [
+    "--disable-blink-features=AutomationControlled",
+    "--no-sandbox",
+    "--disable-setuid-sandbox",
+    "--disable-dev-shm-usage",
+    "--disable-gpu",
+    "--disable-web-security",
+    "--disable-features=IsolateOrigins,site-per-process",
+]
+
 _RU_MONTHS = {
     "января": 1,
     "февраля": 2,
@@ -714,19 +725,29 @@ async def fetch_ads_from_search(
     repo_root = Path(__file__).resolve().parents[3]
 
     try:
-        async with Stealth().use_async(async_playwright()) as p:
-            browser: Browser = await p.chromium.launch(headless=headless)
+        async with async_playwright() as p:
+            browser: Browser = await asyncio.wait_for(
+                p.chromium.launch(
+                    headless=headless,
+                    args=_BROWSER_ARGS,
+                ),
+                timeout=30
+            )
             page: Page = await browser.new_page()
 
             logger.info("OLX navigate: %s", url)
-            await page.goto(url, wait_until="domcontentloaded")
-            # Strong waits: OLX is heavily JS-driven; we need deterministic rendering.
+            
+            # Таймауты для надёжности
+            page.set_default_timeout(30000)
+            
+            await page.goto(url, wait_until="domcontentloaded", timeout=60000)
+            
             try:
-                await page.wait_for_load_state("networkidle")
+                await page.wait_for_load_state("networkidle", timeout=15000)
             except Exception:
-                logger.debug("OLX: wait_for_load_state(networkidle) failed; continuing anyway")
+                logger.debug("OLX: networkidle timeout; continuing anyway")
 
-            await asyncio.sleep(5)
+            await asyncio.sleep(3)
 
             try:
                 page_title = await page.title()
@@ -791,6 +812,8 @@ async def fetch_ads_from_search(
 
             await browser.close()
 
+    except asyncio.TimeoutError:
+        logger.error("fetch_ads_from_search: TIMEOUT (url=%s)", url)
     except Exception:
         logger.exception("fetch_ads_from_search failed (url=%s)", url)
 
@@ -811,14 +834,20 @@ async def fetch_ads_from_search_fast(
     headless = headless_env in {"1", "true", "yes", "y", "on"}
 
     try:
-        async with Stealth().use_async(async_playwright()) as p:
-            browser: Browser = await p.chromium.launch(headless=headless)
+        async with async_playwright() as p:
+            browser: Browser = await asyncio.wait_for(
+                p.chromium.launch(
+                    headless=headless,
+                    args=_BROWSER_ARGS,
+                ),
+                timeout=30
+            )
             page: Page = await browser.new_page()
 
             logger.info("OLX fast navigate: %s", url)
-            await page.goto(url, wait_until="domcontentloaded", timeout=10000)
-            # Уменьшенное ожидание для скорости
-            await asyncio.sleep(2)  # было 5 секунд
+            page.set_default_timeout(20000)
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
+            await asyncio.sleep(2)
 
             candidates = await _collect_candidate_ads(page)
             logger.info("OLX fast: candidates=%s for url=%s", len(candidates), url)
@@ -846,6 +875,8 @@ async def fetch_ads_from_search_fast(
 
             await browser.close()
 
+    except asyncio.TimeoutError:
+        logger.error("fetch_ads_from_search_fast: TIMEOUT (url=%s)", url)
     except Exception:
         logger.exception("fetch_ads_from_search_fast failed (url=%s)", url)
 
@@ -870,17 +901,24 @@ async def fetch_ad_details(url: str) -> dict[str, str | int | None]:
     }
 
     try:
-        async with Stealth().use_async(async_playwright()) as p:
-            browser: Browser = await p.chromium.launch(headless=headless)
+        async with async_playwright() as p:
+            browser: Browser = await asyncio.wait_for(
+                p.chromium.launch(
+                    headless=headless,
+                    args=_BROWSER_ARGS,
+                ),
+                timeout=30
+            )
             page: Page = await browser.new_page()
+            page.set_default_timeout(20000)
 
-            await page.goto(url, wait_until="domcontentloaded")
+            await page.goto(url, wait_until="domcontentloaded", timeout=30000)
             try:
-                await page.wait_for_load_state("networkidle")
+                await page.wait_for_load_state("networkidle", timeout=10000)
             except Exception:
-                logger.debug("OLX details: wait_for_load_state(networkidle) failed for %s", url)
+                logger.debug("OLX details: networkidle timeout for %s", url)
 
-            await page.wait_for_timeout(1200)
+            await page.wait_for_timeout(1000)
 
             page_text = await page.locator("body").inner_text()
             parsed_rooms = _parse_rooms(page_text)

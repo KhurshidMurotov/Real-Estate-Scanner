@@ -417,49 +417,51 @@ async def _notify_users_for_ad(*, bot: Bot, session: AsyncSession, ad: ParsedAd)
             logger.exception("Failed to send ad notification (user_id=%s, olx_id=%s)", user_id, ad.olx_id)
 
 
-# Районы Ташкента для сбора данных для оценки
+# Районы Ташкента для сбора данных для оценки (топ-5 по активности)
 _TASHKENT_DISTRICTS = [
     ("sale", "tashkent"),
     ("rent", "tashkent"),
     ("sale", "mirzoulugbek"),
     ("rent", "mirzoulugbek"),
-    ("sale", "yashnabadskiy"),
-    ("rent", "yashnabadskiy"),
     ("sale", "yunusabadskiy"),
     ("rent", "yunusabadskiy"),
     ("sale", "chilanzarskiy"),
     ("rent", "chilanzarskiy"),
     ("sale", "yakkasarayskiy"),
     ("rent", "yakkasarayskiy"),
-    ("sale", "mirabadskiy"),
-    ("rent", "mirabadskiy"),
-    ("sale", "almazarskiy"),
-    ("rent", "almazarskiy"),
-    ("sale", "uchtepinskiy"),
-    ("rent", "uchtepinskiy"),
-    ("sale", "sergeli"),
-    ("rent", "sergeli"),
 ]
 
 
-async def _collect_ads_for_valuation(session: AsyncSession) -> None:
+async def _collect_ads_for_valuation(session: AsyncSession) -> int:
     """Собирает объявления для оценки независимо от фильтров пользователей."""
+    total_saved = 0
+    total_processed = 0
+    
     for ad_type, district_slug in _TASHKENT_DISTRICTS:
         try:
             url = build_search_url(ad_type=ad_type, city_slug=district_slug)
-            logger.info("Сбор для оценки: %s %s", ad_type, district_slug)
+            logger.info("[СБОР] %s %s - URL: %s", ad_type, district_slug, url)
             
-            ads = await fetch_ads_from_search(url=url, ad_type=ad_type, city=district_slug, limit=25)
-            logger.info("Собрано %s объявлений для %s %s", len(ads), ad_type, district_slug)
+            ads = await fetch_ads_from_search(url=url, ad_type=ad_type, city=district_slug, limit=15)
+            logger.info("[СБОР] Получено %s объявлений для %s %s", len(ads), ad_type, district_slug)
             
             for ad in ads:
+                total_processed += 1
                 try:
                     # Проверяем есть ли уже
-                    if not await is_new_ad(session, ad.olx_id):
+                    is_new = await is_new_ad(session, ad.olx_id)
+                    if not is_new:
+                        logger.debug("Объявление %s уже в БД, пропускаем", ad.olx_id)
                         continue
                     
                     # Обогащаем деталями и сохраняем
+                    logger.debug("Обогащаем объявление %s", ad.olx_id)
                     detailed_ad = await enrich_ad_with_details(ad)
+                    
+                    logger.info("[СОХРАНЕНИЕ] %s: %s $, %s м², %s комнат", 
+                                detailed_ad.olx_id, detailed_ad.price, 
+                                detailed_ad.area, detailed_ad.rooms)
+                    
                     await add_ad(
                         session=session,
                         ad_data={
@@ -479,15 +481,19 @@ async def _collect_ads_for_valuation(session: AsyncSession) -> None:
                             "raw_data": asdict(detailed_ad),
                         },
                     )
-                    logger.debug("Сохранено объявление %s", detailed_ad.olx_id)
-                    await asyncio.sleep(0.5)  # Небольшая задержка между объявлениями
-                except Exception:
-                    logger.exception("Ошибка сохранения объявления %s", ad.olx_id)
+                    total_saved += 1
+                    logger.info("[УСПЕХ] Сохранено объявление %s (всего: %s)", detailed_ad.olx_id, total_saved)
+                    await asyncio.sleep(0.3)
+                except Exception as e:
+                    logger.exception("[ОШИБКА] Сохранение %s: %s", ad.olx_id, e)
                     continue
                     
-        except Exception:
-            logger.exception("Ошибка сбора для %s %s", ad_type, district_slug)
+        except Exception as e:
+            logger.exception("[ОШИБКА] Сбор %s %s: %s", ad_type, district_slug, e)
             continue
+    
+    logger.info("[ИТОГО] Обработано: %s, Сохранено новых: %s", total_processed, total_saved)
+    return total_saved
 async def run_worker(bot: Bot, *, interval_seconds: int = 200) -> None:
     """
     Бесконечный воркер: каждые 3 минуты парсит OLX и отправляет уведомления.
