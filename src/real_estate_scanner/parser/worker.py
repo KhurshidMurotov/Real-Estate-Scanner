@@ -26,6 +26,7 @@ from real_estate_scanner.db.init_db import init_db
 from real_estate_scanner.db.models import Filter, SaleBroadcastState, User
 from real_estate_scanner.db.session import AsyncSessionLocal
 from real_estate_scanner.parser.olx_client import ParsedAd, build_search_url, enrich_ad_with_details, fetch_ads_from_search
+from real_estate_scanner.parser.olx_requests import fetch_ads_requests, SimpleAd
 
 logger = logging.getLogger(__name__)
 _LOCAL_TZ = ZoneInfo("Asia/Tashkent")
@@ -417,6 +418,28 @@ async def _notify_users_for_ad(*, bot: Bot, session: AsyncSession, ad: ParsedAd)
             logger.exception("Failed to send ad notification (user_id=%s, olx_id=%s)", user_id, ad.olx_id)
 
 
+def _simple_ad_to_parsed_ad(ad: SimpleAd) -> ParsedAd:
+    """Конвертирует SimpleAd в ParsedAd для совместимости."""
+    return ParsedAd(
+        olx_id=ad.olx_id,
+        ad_type=ad.ad_type,
+        price=ad.price,
+        link=ad.link,
+        title=ad.title,
+        rooms=ad.rooms,
+        area=ad.area,
+        city=ad.city,
+        district=ad.district,
+        image_url=ad.image_url,
+        floor=None,
+        total_floors=None,
+        description=None,
+        author_name=None,
+        created_at_text=None,
+        published_at=None,
+    )
+
+
 # Районы Ташкента для сбора данных для оценки (топ-5 по активности)
 _TASHKENT_DISTRICTS = [
     ("sale", "tashkent"),
@@ -442,7 +465,8 @@ async def _collect_ads_for_valuation(session: AsyncSession) -> int:
             url = build_search_url(ad_type=ad_type, city_slug=district_slug)
             logger.info("[СБОР] %s %s - URL: %s", ad_type, district_slug, url)
             
-            ads = await fetch_ads_from_search(url=url, ad_type=ad_type, city=district_slug, limit=15)
+            ads_simple = await fetch_ads_requests(url=url, ad_type=ad_type, city=district_slug, limit=15)
+            ads = [_simple_ad_to_parsed_ad(a) for a in ads_simple]
             logger.info("[СБОР] Получено %s объявлений для %s %s", len(ads), ad_type, district_slug)
             
             for ad in ads:
@@ -507,6 +531,7 @@ async def run_worker(bot: Bot, *, interval_seconds: int = 200) -> None:
         try:
             async with AsyncSessionLocal() as session:
                 # Сначала собираем объявления для оценки (независимо от фильтров)
+                # Используем requests вместо Playwright (быстрее и не зависает)
                 logger.info("Запуск сбора для оценки...")
                 await _collect_ads_for_valuation(session)
                 
@@ -538,7 +563,8 @@ async def run_worker(bot: Bot, *, interval_seconds: int = 200) -> None:
                     )
                     logger.info("ЗАПУСКАЮ ПОИСК ПО URL: %s", url)
 
-                    ads = await fetch_ads_from_search(url=url, ad_type=ad_type, city=fetch_city_fallback)
+                    ads_simple = await fetch_ads_requests(url=url, ad_type=ad_type, city=fetch_city_fallback)
+                    ads = [_simple_ad_to_parsed_ad(a) for a in ads_simple]
                     logger.info(
                         "Worker: fetched %s ads for fetch_city=%s (original district=%s)",
                         len(ads),

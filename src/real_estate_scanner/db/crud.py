@@ -145,7 +145,7 @@ async def add_ad(session: AsyncSession, ad_data: dict[str, Any]) -> None:
 async def get_comparable_ads(
     session: AsyncSession,
     ad_type: str,
-    district: str,
+    city: str,
     rooms: int,
     area: float,
     limit: int = 20,
@@ -155,7 +155,7 @@ async def get_comparable_ads(
 
     Фильтры:
     - Тот же тип (sale/rent)
-    - Тот же район
+    - Тот же город/район (city slug)
     - Комнаты: точное совпадение или ±1
     - Площадь ±20% от заданной
     - Данные не старше 7 дней
@@ -174,7 +174,7 @@ async def get_comparable_ads(
             select(Ad)
             .where(
                 Ad.ad_type == ad_type,
-                Ad.district == district,
+                Ad.city == city,
                 Ad.rooms >= rooms_min,
                 Ad.rooms <= rooms_max,
                 Ad.area >= area_min,
@@ -189,9 +189,9 @@ async def get_comparable_ads(
         return list(res.scalars().all())
     except Exception:
         logger.exception(
-            "get_comparable_ads failed (type=%s district=%s rooms=%s area=%s)",
+            "get_comparable_ads failed (type=%s city=%s rooms=%s area=%s)",
             ad_type,
-            district,
+            city,
             rooms,
             area,
         )
