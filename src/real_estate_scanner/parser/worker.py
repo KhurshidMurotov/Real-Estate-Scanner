@@ -417,9 +417,80 @@ async def _notify_users_for_ad(*, bot: Bot, session: AsyncSession, ad: ParsedAd)
             logger.exception("Failed to send ad notification (user_id=%s, olx_id=%s)", user_id, ad.olx_id)
 
 
+# Районы Ташкента для сбора данных для оценки
+_TASHKENT_DISTRICTS = [
+    ("sale", "tashkent"),
+    ("rent", "tashkent"),
+    ("sale", "mirzoulugbek"),
+    ("rent", "mirzoulugbek"),
+    ("sale", "yashnabadskiy"),
+    ("rent", "yashnabadskiy"),
+    ("sale", "yunusabadskiy"),
+    ("rent", "yunusabadskiy"),
+    ("sale", "chilanzarskiy"),
+    ("rent", "chilanzarskiy"),
+    ("sale", "yakkasarayskiy"),
+    ("rent", "yakkasarayskiy"),
+    ("sale", "mirabadskiy"),
+    ("rent", "mirabadskiy"),
+    ("sale", "almazarskiy"),
+    ("rent", "almazarskiy"),
+    ("sale", "uchtepinskiy"),
+    ("rent", "uchtepinskiy"),
+    ("sale", "sergeli"),
+    ("rent", "sergeli"),
+]
+
+
+async def _collect_ads_for_valuation(session: AsyncSession) -> None:
+    """Собирает объявления для оценки независимо от фильтров пользователей."""
+    for ad_type, district_slug in _TASHKENT_DISTRICTS:
+        try:
+            url = build_search_url(ad_type=ad_type, city_slug=district_slug)
+            logger.info("Сбор для оценки: %s %s", ad_type, district_slug)
+            
+            ads = await fetch_ads_from_search(url=url, ad_type=ad_type, city=district_slug, limit=25)
+            logger.info("Собрано %s объявлений для %s %s", len(ads), ad_type, district_slug)
+            
+            for ad in ads:
+                try:
+                    # Проверяем есть ли уже
+                    if not await is_new_ad(session, ad.olx_id):
+                        continue
+                    
+                    # Обогащаем деталями и сохраняем
+                    detailed_ad = await enrich_ad_with_details(ad)
+                    await add_ad(
+                        session=session,
+                        ad_data={
+                            "olx_id": detailed_ad.olx_id,
+                            "ad_type": detailed_ad.ad_type,
+                            "price": detailed_ad.price,
+                            "link": detailed_ad.link,
+                            "title": detailed_ad.title,
+                            "image_url": detailed_ad.image_url,
+                            "area": detailed_ad.area,
+                            "rooms": detailed_ad.rooms,
+                            "floor": detailed_ad.floor,
+                            "total_floors": detailed_ad.total_floors,
+                            "district": detailed_ad.district,
+                            "city": detailed_ad.city,
+                            "description": detailed_ad.description,
+                            "raw_data": asdict(detailed_ad),
+                        },
+                    )
+                    logger.debug("Сохранено объявление %s", detailed_ad.olx_id)
+                    await asyncio.sleep(0.5)  # Небольшая задержка между объявлениями
+                except Exception:
+                    logger.exception("Ошибка сохранения объявления %s", ad.olx_id)
+                    continue
+                    
+        except Exception:
+            logger.exception("Ошибка сбора для %s %s", ad_type, district_slug)
+            continue
 async def run_worker(bot: Bot, *, interval_seconds: int = 200) -> None:
     """
-    Бесконечный воркер: каждые 10 минут парсит OLX и отправляет уведомления.
+    Бесконечный воркер: каждые 3 минуты парсит OLX и отправляет уведомления.
     """
     logger.info("Worker started (interval=%ss)", interval_seconds)
 
@@ -429,6 +500,10 @@ async def run_worker(bot: Bot, *, interval_seconds: int = 200) -> None:
     while True:
         try:
             async with AsyncSessionLocal() as session:
+                # Сначала собираем объявления для оценки (независимо от фильтров)
+                logger.info("Запуск сбора для оценки...")
+                await _collect_ads_for_valuation(session)
+                
                 sale_states = await list_active_sale_broadcast_states(session)
                 for state in sale_states:
                     sent_count = await send_sale_broadcast_batch(bot=bot, session=session, state=state)
