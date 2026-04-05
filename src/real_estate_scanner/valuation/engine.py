@@ -85,7 +85,7 @@ async def fetch_comparable_ads(
             ads_from_db = await get_comparable_ads_from_db(
                 session=session,
                 ad_type=params.ad_type,
-                district=params.district,
+                city=params.district,
                 rooms=params.rooms,
                 area=params.area,
                 limit=limit,
@@ -203,8 +203,43 @@ def calculate_valuation(
     
     prices_per_sqm = calculate_price_per_sqm(comparable_ads)
     
+    # Fallback: если нет цен за м² (у объявлений нет area), используем среднюю цену за объявление
     if not prices_per_sqm:
-        logger.warning("Оценка: не удалось вычислить цену за м²")
+        logger.warning("Оценка: нет данных о площади в объявлениях, используем среднюю цену")
+        
+        # Берём цены объявлений с тем же количеством комнат
+        matching_prices = []
+        for ad in comparable_ads:
+            if ad.rooms == params.rooms and ad.price > 0:
+                matching_prices.append(ad.price)
+        
+        # Если нет точного совпадения по комнатам - берём все
+        if not matching_prices:
+            matching_prices = [ad.price for ad in comparable_ads if ad.price > 0]
+        
+        if matching_prices:
+            avg_total_price = sum(matching_prices) / len(matching_prices)
+            # Применяем коэффициенты к средней цене
+            adjusted_price = apply_adjustment_coefficients(avg_total_price * UZS_TO_USD_RATE, params)
+            
+            # Диапазон ±20%
+            min_price = int(adjusted_price * 0.8)
+            max_price = int(adjusted_price * 1.2)
+            
+            # Приблизительная цена за м²
+            avg_price_per_sqm = adjusted_price / params.area if params.area > 0 else 0
+            
+            confidence = "low" if len(matching_prices) < 5 else "medium"
+            
+            return ValuationResult(
+                min_price=min_price,
+                max_price=max_price,
+                avg_price_per_sqm=round(avg_price_per_sqm, 2),
+                comparable_ads=comparable_ads,
+                confidence=confidence,
+            )
+        
+        logger.warning("Оценка: не удалось вычислить цену")
         return ValuationResult(
             min_price=0,
             max_price=0,
@@ -298,12 +333,23 @@ async def estimate_property_value(
 
 def format_valuation_message(result: ValuationResult, params: ValuationParams) -> str:
     """Форматирует результат оценки для отправки пользователю."""
-    if result.confidence == "low":
+    
+    # Если нет объявлений вообще - показываем ошибку
+    if not result.comparable_ads:
         return (
             "📊 *Результат оценки*\n\n"
             "❌ Недостаточно данных для оценки.\n"
-            f"Найдено объявлений: {len(result.comparable_ads)}\n\n"
+            "Найдено объявлений: 0\n\n"
             "💡 *Совет:* Попробуйте выбрать другой район или увеличить диапазон площади."
+        )
+    
+    # Если есть объявления но confidence=low - всё равно показываем оценку (приблизительную)
+    if result.confidence == "low" and (result.min_price == 0 or result.max_price == 0):
+        return (
+            "📊 *Результат оценки*\n\n"
+            "⚠️ *Найдено мало данных для точной оценки.*\n"
+            f"Найдено объявлений: {len(result.comparable_ads)}\n\n"
+            "💡 *Совет:* Для более точной оценки нужно минимум 5 сравнимых объявлений с указанной площадью."
         )
     
     # Определяем эмодзи уверенности
