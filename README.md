@@ -26,8 +26,23 @@ Run tests:
 
 ## Run bot
 
+### Information about run bot
+
+- Сборщик запускается автоматически при старте бота.
+- Воркер собирает объявления в фоне.
+
 Из корня проекта:
 - `python -m real_estate_scanner.bot.main`
+
+## Information gathering
+
+### Information about seed data
+
+- Скрипт `python scripts/seed_real_data.py` парсит 20 объявлений с OLX (продажа и аренда Ташкента) исохранит в БД.
+
+Из корня проекта:
+- `python scripts/seed_real_data.py`
+
 
 # Как работает оценка
 Оценка недвижимости работает по алгоритму Market Comparison Approach:
